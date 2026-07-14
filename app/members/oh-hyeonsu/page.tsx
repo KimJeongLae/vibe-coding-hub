@@ -4,14 +4,17 @@ import { useState } from "react";
 import MemberShell from "@/components/MemberShell";
 
 // ✏️ "oh-hyeonsu" 님의 페이지 — 인기 영상 모음 (MVP)
-// 탭: 정형외과(부위·나이대 필터) / 일반 인기 영상(카테고리별). 모두 조회수순 정렬.
+// 상단: 국내/해외 토글(전체 적용). 탭: 정형외과(부위·나이대) / 콜라보 추천.
 // ⚠️ YouTube API 미연동 — 아래 샘플 데이터로 화면과 필터/탭 전환만 동작합니다.
+
+type Region = "domestic" | "overseas";
 
 type Video = {
   title: string;
   channel: string;
   views: number; // 조회수 (정렬 기준)
   duration: string;
+  region: Region;
   ages?: number[]; // 정형외과 영상의 추천 나이대 (10~70)
 };
 
@@ -43,183 +46,179 @@ function formatViews(n: number): string {
 
 const AGE_GROUPS = [10, 20, 30, 40, 50, 60, 70];
 
-// ─────────────────── 정형외과: 부위별 카테고리 (각 10개) ───────────────────
+// ─────────────────── 정형외과: 부위별 카테고리 ───────────────────
 const ORTHO_CATEGORIES: Category[] = [
   {
     key: "neck",
     label: "목",
     videos: [
-      { title: "거북목 교정 스트레칭 5분 루틴", channel: "바른자세연구소", views: 1980000, duration: "05:12", ages: [10, 20, 30] },
-      { title: "목 디스크 초기 증상과 자가진단법", channel: "정형외과 김원장", views: 1720000, duration: "09:41", ages: [30, 40, 50] },
-      { title: "일자목, 베개 하나로 잡는 법", channel: "튼튼정형외과TV", views: 1340000, duration: "08:03", ages: [20, 30, 40] },
-      { title: "스마트폰 목 통증 예방 습관", channel: "닥터 재활", views: 1120000, duration: "06:27", ages: [10, 20, 30] },
-      { title: "자고 나면 목이 안 돌아갈 때", channel: "서울관절병원", views: 890000, duration: "07:15", ages: [20, 30, 40, 50] },
-      { title: "목·어깨 뭉침 푸는 셀프 마사지", channel: "바른자세연구소", views: 760000, duration: "10:44", ages: [20, 30, 40, 50] },
-      { title: "경추 협착증 환자를 위한 안전 운동", channel: "정형외과 김원장", views: 640000, duration: "12:18", ages: [50, 60, 70] },
-      { title: "학생 거북목, 공부자세 교정법", channel: "스포츠재활클리닉", views: 520000, duration: "07:52", ages: [10, 20] },
-      { title: "목 디스크, 수술 없이 관리하기", channel: "튼튼정형외과TV", views: 430000, duration: "13:05", ages: [40, 50, 60] },
-      { title: "어르신 목 통증 완화 스트레칭", channel: "닥터 재활", views: 310000, duration: "09:38", ages: [60, 70] },
+      // 국내
+      { title: "거북목 교정 스트레칭 5분 루틴", channel: "바른자세연구소", views: 1980000, duration: "05:12", region: "domestic", ages: [10, 20, 30] },
+      { title: "목 디스크 초기 증상과 자가진단법", channel: "정형외과 김원장", views: 1720000, duration: "09:41", region: "domestic", ages: [30, 40, 50] },
+      { title: "일자목, 베개 하나로 잡는 법", channel: "튼튼정형외과TV", views: 1340000, duration: "08:03", region: "domestic", ages: [20, 30, 40] },
+      { title: "스마트폰 목 통증 예방 습관", channel: "닥터 재활", views: 1120000, duration: "06:27", region: "domestic", ages: [10, 20, 30] },
+      { title: "자고 나면 목이 안 돌아갈 때", channel: "서울관절병원", views: 890000, duration: "07:15", region: "domestic", ages: [20, 30, 40, 50] },
+      { title: "목·어깨 뭉침 푸는 셀프 마사지", channel: "바른자세연구소", views: 760000, duration: "10:44", region: "domestic", ages: [20, 30, 40, 50] },
+      { title: "경추 협착증 환자를 위한 안전 운동", channel: "정형외과 김원장", views: 640000, duration: "12:18", region: "domestic", ages: [50, 60, 70] },
+      { title: "학생 거북목, 공부자세 교정법", channel: "스포츠재활클리닉", views: 520000, duration: "07:52", region: "domestic", ages: [10, 20] },
+      { title: "목 디스크, 수술 없이 관리하기", channel: "튼튼정형외과TV", views: 430000, duration: "13:05", region: "domestic", ages: [40, 50, 60] },
+      { title: "어르신 목 통증 완화 스트레칭", channel: "닥터 재활", views: 310000, duration: "09:38", region: "domestic", ages: [60, 70] },
+      // 해외
+      { title: "Fix 'Tech Neck' in 5 Minutes", channel: "Bob & Brad", views: 14000000, duration: "05:58", region: "overseas", ages: [10, 20, 30] },
+      { title: "Neck Pain Relief: The 90-Second Fix", channel: "AskDoctorJo", views: 8600000, duration: "06:11", region: "overseas", ages: [20, 30, 40] },
+      { title: "Best Exercises for a Neck Disc", channel: "Rehab Science", views: 5200000, duration: "12:44", region: "overseas", ages: [30, 40, 50] },
+      { title: "Forward Head Posture Correction", channel: "E3 Rehab", views: 3400000, duration: "09:27", region: "overseas", ages: [20, 30, 40] },
+      { title: "Cervical Stenosis Safe Exercises", channel: "Physical Therapy Guru", views: 1900000, duration: "11:36", region: "overseas", ages: [50, 60, 70] },
     ],
   },
   {
     key: "shoulder",
     label: "어깨",
     videos: [
-      { title: "오십견, 이 동작 하나면 어깨가 풀립니다", channel: "닥터 재활", views: 2150000, duration: "07:52", ages: [40, 50, 60] },
-      { title: "회전근개 파열, 수술해야 할까?", channel: "서울관절병원", views: 1680000, duration: "15:23", ages: [40, 50, 60, 70] },
-      { title: "라운드숄더(굽은 어깨) 교정 운동", channel: "바른자세연구소", views: 1290000, duration: "09:10", ages: [20, 30, 40] },
-      { title: "헬스 중 어깨 통증, 원인과 해결", channel: "스포츠재활클리닉", views: 1040000, duration: "11:33", ages: [20, 30] },
-      { title: "어깨 충돌증후군 재활 운동", channel: "정형외과 김원장", views: 870000, duration: "10:47", ages: [30, 40, 50] },
-      { title: "오십견 초기 증상 자가진단", channel: "튼튼정형외과TV", views: 720000, duration: "06:19", ages: [40, 50, 60] },
-      { title: "운동 전 어깨 워밍업 루틴", channel: "스포츠재활클리닉", views: 610000, duration: "05:48", ages: [10, 20, 30] },
-      { title: "어깨 석회성 건염 관리법", channel: "서울관절병원", views: 480000, duration: "12:02", ages: [40, 50, 60] },
-      { title: "어깨 뭉침 풀어주는 스트레칭", channel: "바른자세연구소", views: 390000, duration: "08:26", ages: [20, 30, 40, 50] },
-      { title: "어르신 어깨 통증 안전 재활", channel: "닥터 재활", views: 260000, duration: "10:15", ages: [60, 70] },
+      { title: "오십견, 이 동작 하나면 어깨가 풀립니다", channel: "닥터 재활", views: 2150000, duration: "07:52", region: "domestic", ages: [40, 50, 60] },
+      { title: "회전근개 파열, 수술해야 할까?", channel: "서울관절병원", views: 1680000, duration: "15:23", region: "domestic", ages: [40, 50, 60, 70] },
+      { title: "라운드숄더(굽은 어깨) 교정 운동", channel: "바른자세연구소", views: 1290000, duration: "09:10", region: "domestic", ages: [20, 30, 40] },
+      { title: "헬스 중 어깨 통증, 원인과 해결", channel: "스포츠재활클리닉", views: 1040000, duration: "11:33", region: "domestic", ages: [20, 30] },
+      { title: "어깨 충돌증후군 재활 운동", channel: "정형외과 김원장", views: 870000, duration: "10:47", region: "domestic", ages: [30, 40, 50] },
+      { title: "오십견 초기 증상 자가진단", channel: "튼튼정형외과TV", views: 720000, duration: "06:19", region: "domestic", ages: [40, 50, 60] },
+      { title: "운동 전 어깨 워밍업 루틴", channel: "스포츠재활클리닉", views: 610000, duration: "05:48", region: "domestic", ages: [10, 20, 30] },
+      { title: "어깨 석회성 건염 관리법", channel: "서울관절병원", views: 480000, duration: "12:02", region: "domestic", ages: [40, 50, 60] },
+      { title: "어깨 뭉침 풀어주는 스트레칭", channel: "바른자세연구소", views: 390000, duration: "08:26", region: "domestic", ages: [20, 30, 40, 50] },
+      { title: "어르신 어깨 통증 안전 재활", channel: "닥터 재활", views: 260000, duration: "10:15", region: "domestic", ages: [60, 70] },
+      { title: "Frozen Shoulder: Full Recovery Routine", channel: "AskDoctorJo", views: 9400000, duration: "08:36", region: "overseas", ages: [40, 50, 60] },
+      { title: "Rotator Cuff Tear — Surgery or Not?", channel: "Sports Ortho Clinic", views: 7100000, duration: "16:44", region: "overseas", ages: [40, 50, 60, 70] },
+      { title: "Rounded Shoulders Fix (Posture)", channel: "E3 Rehab", views: 4600000, duration: "09:52", region: "overseas", ages: [20, 30, 40] },
+      { title: "Shoulder Impingement Rehab", channel: "Rehab Science", views: 3000000, duration: "13:18", region: "overseas", ages: [30, 40, 50] },
+      { title: "Shoulder Warm-up Before Lifting", channel: "Bob & Brad", views: 1700000, duration: "05:31", region: "overseas", ages: [10, 20, 30] },
     ],
   },
   {
     key: "back",
     label: "허리",
     videos: [
-      { title: "허리 디스크 초기 증상과 자가진단법 총정리", channel: "튼튼정형외과TV", views: 2340000, duration: "09:41", ages: [20, 30, 40, 50] },
-      { title: "척추관 협착증 환자를 위한 걷기 운동", channel: "바른자세연구소", views: 1760000, duration: "10:18", ages: [50, 60, 70] },
-      { title: "앉아서 일하는 사람 허리 관리법", channel: "정형외과 김원장", views: 1450000, duration: "08:37", ages: [20, 30, 40] },
-      { title: "급성 요통(삐끗) 응급 대처법", channel: "서울관절병원", views: 1180000, duration: "07:09", ages: [20, 30, 40, 50] },
-      { title: "허리 통증 잡는 초간단 스트레칭", channel: "닥터 재활", views: 990000, duration: "06:44", ages: [20, 30, 40] },
-      { title: "허리 디스크, 수술 없이 재활하기", channel: "튼튼정형외과TV", views: 820000, duration: "13:59", ages: [30, 40, 50] },
-      { title: "코어 강화로 허리 보호하기", channel: "스포츠재활클리닉", views: 690000, duration: "11:22", ages: [20, 30, 40] },
-      { title: "학생 허리 통증, 자세 교정법", channel: "바른자세연구소", views: 540000, duration: "07:31", ages: [10, 20] },
-      { title: "임신부 허리 통증 완화 운동", channel: "닥터 재활", views: 420000, duration: "09:12", ages: [20, 30] },
-      { title: "어르신 허리 굽음 예방 운동", channel: "정형외과 김원장", views: 300000, duration: "10:05", ages: [60, 70] },
+      { title: "허리 디스크 초기 증상과 자가진단법 총정리", channel: "튼튼정형외과TV", views: 2340000, duration: "09:41", region: "domestic", ages: [20, 30, 40, 50] },
+      { title: "척추관 협착증 환자를 위한 걷기 운동", channel: "바른자세연구소", views: 1760000, duration: "10:18", region: "domestic", ages: [50, 60, 70] },
+      { title: "앉아서 일하는 사람 허리 관리법", channel: "정형외과 김원장", views: 1450000, duration: "08:37", region: "domestic", ages: [20, 30, 40] },
+      { title: "급성 요통(삐끗) 응급 대처법", channel: "서울관절병원", views: 1180000, duration: "07:09", region: "domestic", ages: [20, 30, 40, 50] },
+      { title: "허리 통증 잡는 초간단 스트레칭", channel: "닥터 재활", views: 990000, duration: "06:44", region: "domestic", ages: [20, 30, 40] },
+      { title: "허리 디스크, 수술 없이 재활하기", channel: "튼튼정형외과TV", views: 820000, duration: "13:59", region: "domestic", ages: [30, 40, 50] },
+      { title: "코어 강화로 허리 보호하기", channel: "스포츠재활클리닉", views: 690000, duration: "11:22", region: "domestic", ages: [20, 30, 40] },
+      { title: "학생 허리 통증, 자세 교정법", channel: "바른자세연구소", views: 540000, duration: "07:31", region: "domestic", ages: [10, 20] },
+      { title: "임신부 허리 통증 완화 운동", channel: "닥터 재활", views: 420000, duration: "09:12", region: "domestic", ages: [20, 30] },
+      { title: "어르신 허리 굽음 예방 운동", channel: "정형외과 김원장", views: 300000, duration: "10:05", region: "domestic", ages: [60, 70] },
+      { title: "Herniated Disc: The BEST Exercises", channel: "Rehab Science", views: 12000000, duration: "14:08", region: "overseas", ages: [20, 30, 40, 50] },
+      { title: "Spinal Stenosis Walking Program", channel: "Physical Therapy Guru", views: 6300000, duration: "12:51", region: "overseas", ages: [50, 60, 70] },
+      { title: "Low Back Pain: Quick Relief", channel: "AskDoctorJo", views: 4100000, duration: "07:22", region: "overseas", ages: [20, 30, 40] },
+      { title: "Core Stability for Your Back", channel: "E3 Rehab", views: 2600000, duration: "10:47", region: "overseas", ages: [20, 30, 40] },
+      { title: "Sciatica Stretch Routine", channel: "Bob & Brad", views: 1500000, duration: "08:03", region: "overseas", ages: [30, 40, 50] },
     ],
   },
   {
     key: "knee",
     label: "무릎",
     videos: [
-      { title: "무릎 통증, 수술 없이 좋아지는 스트레칭 3가지", channel: "정형외과 김원장", views: 2210000, duration: "12:04", ages: [40, 50, 60] },
-      { title: "퇴행성 관절염, 무릎 지키는 운동", channel: "서울관절병원", views: 1590000, duration: "13:27", ages: [50, 60, 70] },
-      { title: "반월상 연골 손상 재활 4주 프로그램", channel: "스포츠재활클리닉", views: 1310000, duration: "13:59", ages: [20, 30, 40] },
-      { title: "러닝 후 무릎 통증, 원인은?", channel: "스포츠재활클리닉", views: 1080000, duration: "09:48", ages: [10, 20, 30] },
-      { title: "계단 오르내릴 때 무릎 아플 때", channel: "튼튼정형외과TV", views: 910000, duration: "08:15", ages: [40, 50, 60] },
-      { title: "무릎 연골 지키는 근력 운동", channel: "닥터 재활", views: 780000, duration: "10:33", ages: [30, 40, 50] },
-      { title: "십자인대 파열 수술 후 재활", channel: "스포츠재활클리닉", views: 650000, duration: "14:20", ages: [10, 20, 30] },
-      { title: "무릎 붓기 빠르게 빼는 관리법", channel: "바른자세연구소", views: 520000, duration: "07:41", ages: [30, 40, 50, 60] },
-      { title: "성장기 무릎 통증(오스굿병) 관리", channel: "정형외과 김원장", views: 380000, duration: "08:58", ages: [10] },
-      { title: "어르신 인공관절 수술 후 운동", channel: "서울관절병원", views: 270000, duration: "11:49", ages: [60, 70] },
+      { title: "무릎 통증, 수술 없이 좋아지는 스트레칭 3가지", channel: "정형외과 김원장", views: 2210000, duration: "12:04", region: "domestic", ages: [40, 50, 60] },
+      { title: "퇴행성 관절염, 무릎 지키는 운동", channel: "서울관절병원", views: 1590000, duration: "13:27", region: "domestic", ages: [50, 60, 70] },
+      { title: "반월상 연골 손상 재활 4주 프로그램", channel: "스포츠재활클리닉", views: 1310000, duration: "13:59", region: "domestic", ages: [20, 30, 40] },
+      { title: "러닝 후 무릎 통증, 원인은?", channel: "스포츠재활클리닉", views: 1080000, duration: "09:48", region: "domestic", ages: [10, 20, 30] },
+      { title: "계단 오르내릴 때 무릎 아플 때", channel: "튼튼정형외과TV", views: 910000, duration: "08:15", region: "domestic", ages: [40, 50, 60] },
+      { title: "무릎 연골 지키는 근력 운동", channel: "닥터 재활", views: 780000, duration: "10:33", region: "domestic", ages: [30, 40, 50] },
+      { title: "십자인대 파열 수술 후 재활", channel: "스포츠재활클리닉", views: 650000, duration: "14:20", region: "domestic", ages: [10, 20, 30] },
+      { title: "무릎 붓기 빠르게 빼는 관리법", channel: "바른자세연구소", views: 520000, duration: "07:41", region: "domestic", ages: [30, 40, 50, 60] },
+      { title: "성장기 무릎 통증(오스굿병) 관리", channel: "정형외과 김원장", views: 380000, duration: "08:58", region: "domestic", ages: [10] },
+      { title: "어르신 인공관절 수술 후 운동", channel: "서울관절병원", views: 270000, duration: "11:49", region: "domestic", ages: [60, 70] },
+      { title: "Fix Knee Pain in 5 Minutes (No Equipment)", channel: "Bob & Brad", views: 18000000, duration: "10:22", region: "overseas", ages: [40, 50, 60] },
+      { title: "Knee Osteoarthritis Exercises", channel: "Physical Therapy Guru", views: 7800000, duration: "13:41", region: "overseas", ages: [50, 60, 70] },
+      { title: "Meniscus Tear Rehab Protocol", channel: "Rehab Science", views: 4200000, duration: "18:03", region: "overseas", ages: [20, 30, 40] },
+      { title: "Runner's Knee: The Real Fix", channel: "E3 Rehab", views: 2900000, duration: "09:35", region: "overseas", ages: [10, 20, 30] },
+      { title: "ACL Reconstruction Rehab Guide", channel: "Sports Ortho Clinic", views: 1600000, duration: "16:12", region: "overseas", ages: [10, 20, 30] },
     ],
   },
   {
     key: "ankle",
     label: "발목",
     videos: [
-      { title: "발목 삐끗했을 때 절대 하면 안 되는 것", channel: "정형외과 김원장", views: 1870000, duration: "06:33", ages: [10, 20, 30, 40] },
-      { title: "자주 삐는 발목(불안정성) 강화 운동", channel: "스포츠재활클리닉", views: 1240000, duration: "09:27", ages: [20, 30, 40] },
-      { title: "발목 인대 파열 재활 가이드", channel: "서울관절병원", views: 1010000, duration: "11:14", ages: [10, 20, 30] },
-      { title: "족저근막염 스트레칭 총정리", channel: "닥터 재활", views: 860000, duration: "08:52", ages: [30, 40, 50, 60] },
-      { title: "아킬레스건염 원인과 관리법", channel: "튼튼정형외과TV", views: 720000, duration: "10:06", ages: [20, 30, 40, 50] },
-      { title: "발목 골절 후 재활 운동 단계별", channel: "스포츠재활클리닉", views: 590000, duration: "12:31", ages: [30, 40, 50] },
-      { title: "축구·농구 발목 부상 예방법", channel: "스포츠재활클리닉", views: 480000, duration: "07:48", ages: [10, 20] },
-      { title: "발목 붓기 빠르게 빼기", channel: "바른자세연구소", views: 360000, duration: "06:19", ages: [20, 30, 40] },
-      { title: "평발로 인한 발목 통증 관리", channel: "정형외과 김원장", views: 280000, duration: "09:03", ages: [10, 20, 30] },
-      { title: "어르신 발목 근력·낙상 예방 운동", channel: "닥터 재활", views: 190000, duration: "10:22", ages: [60, 70] },
+      { title: "발목 삐끗했을 때 절대 하면 안 되는 것", channel: "정형외과 김원장", views: 1870000, duration: "06:33", region: "domestic", ages: [10, 20, 30, 40] },
+      { title: "자주 삐는 발목(불안정성) 강화 운동", channel: "스포츠재활클리닉", views: 1240000, duration: "09:27", region: "domestic", ages: [20, 30, 40] },
+      { title: "발목 인대 파열 재활 가이드", channel: "서울관절병원", views: 1010000, duration: "11:14", region: "domestic", ages: [10, 20, 30] },
+      { title: "아킬레스건염 원인과 관리법", channel: "튼튼정형외과TV", views: 720000, duration: "10:06", region: "domestic", ages: [20, 30, 40, 50] },
+      { title: "발목 골절 후 재활 운동 단계별", channel: "스포츠재활클리닉", views: 590000, duration: "12:31", region: "domestic", ages: [30, 40, 50] },
+      { title: "축구·농구 발목 부상 예방법", channel: "스포츠재활클리닉", views: 480000, duration: "07:48", region: "domestic", ages: [10, 20] },
+      { title: "발목 붓기 빠르게 빼기", channel: "바른자세연구소", views: 360000, duration: "06:19", region: "domestic", ages: [20, 30, 40] },
+      { title: "만성 발목 통증 셀프 관리", channel: "닥터 재활", views: 280000, duration: "09:03", region: "domestic", ages: [30, 40, 50] },
+      { title: "발목 근력 밴드 운동 루틴", channel: "스포츠재활클리닉", views: 220000, duration: "08:22", region: "domestic", ages: [20, 30, 40] },
+      { title: "어르신 발목 근력·낙상 예방 운동", channel: "닥터 재활", views: 160000, duration: "10:22", region: "domestic", ages: [60, 70] },
+      { title: "How to Heal a Sprained Ankle Fast", channel: "E3 Rehab", views: 5800000, duration: "07:19", region: "overseas", ages: [10, 20, 30, 40] },
+      { title: "Chronic Ankle Instability Exercises", channel: "Rehab Science", views: 3300000, duration: "11:48", region: "overseas", ages: [20, 30, 40] },
+      { title: "Achilles Tendinitis: Full Guide", channel: "Physical Therapy Guru", views: 2400000, duration: "12:05", region: "overseas", ages: [20, 30, 40, 50] },
+      { title: "Ankle Sprain Prevention for Athletes", channel: "Sports Ortho Clinic", views: 1300000, duration: "08:41", region: "overseas", ages: [10, 20] },
+      { title: "Ankle Mobility Routine (Daily)", channel: "Bob & Brad", views: 900000, duration: "06:57", region: "overseas", ages: [20, 30, 40] },
+    ],
+  },
+  {
+    key: "foot",
+    label: "발",
+    videos: [
+      { title: "족저근막염 아침 통증 잡는 스트레칭", channel: "닥터 재활", views: 1450000, duration: "07:26", region: "domestic", ages: [30, 40, 50] },
+      { title: "무지외반증(엄지 튀어나옴) 관리법", channel: "정형외과 김원장", views: 1120000, duration: "09:14", region: "domestic", ages: [30, 40, 50, 60] },
+      { title: "평발 교정 운동과 깔창 고르는 법", channel: "바른자세연구소", views: 940000, duration: "10:38", region: "domestic", ages: [10, 20, 30] },
+      { title: "발 아치 무너짐, 셀프 체크법", channel: "스포츠재활클리닉", views: 780000, duration: "06:52", region: "domestic", ages: [20, 30, 40] },
+      { title: "발가락 저림, 원인과 대처법", channel: "서울관절병원", views: 660000, duration: "08:47", region: "domestic", ages: [40, 50, 60] },
+      { title: "하이힐 자주 신는 사람 발 건강 관리", channel: "튼튼정형외과TV", views: 540000, duration: "07:33", region: "domestic", ages: [20, 30, 40] },
+      { title: "티눈·굳은살 안전하게 관리하기", channel: "닥터 재활", views: 430000, duration: "06:18", region: "domestic", ages: [30, 40, 50] },
+      { title: "발바닥 통증 부위별 원인 총정리", channel: "정형외과 김원장", views: 350000, duration: "11:09", region: "domestic", ages: [30, 40, 50, 60] },
+      { title: "성장기 아이 발 통증 체크리스트", channel: "바른자세연구소", views: 260000, duration: "08:05", region: "domestic", ages: [10] },
+      { title: "어르신 발 저림·부종 관리법", channel: "닥터 재활", views: 180000, duration: "09:41", region: "domestic", ages: [60, 70] },
+      { title: "Plantar Fasciitis: Morning Pain Fix", channel: "AskDoctorJo", views: 6700000, duration: "08:12", region: "overseas", ages: [30, 40, 50] },
+      { title: "Bunion Management Without Surgery", channel: "Physical Therapy Guru", views: 3900000, duration: "10:27", region: "overseas", ages: [30, 40, 50, 60] },
+      { title: "Flat Feet Correction Exercises", channel: "E3 Rehab", views: 2500000, duration: "09:19", region: "overseas", ages: [10, 20, 30] },
+      { title: "Fallen Arches: Self-Check & Fix", channel: "Rehab Science", views: 1400000, duration: "11:33", region: "overseas", ages: [20, 30, 40] },
+      { title: "Foot Numbness: Causes & Fixes", channel: "Bob & Brad", views: 800000, duration: "07:44", region: "overseas", ages: [40, 50, 60] },
     ],
   },
 ];
 
-// ─────────────────── 일반 인기 영상: 카테고리별 ───────────────────
-const GENERAL_CATEGORIES: Category[] = [
-  {
-    key: "music",
-    label: "🎵 음악",
-    videos: [
-      { title: "[MV] 신곡 뮤직비디오 공식 영상", channel: "K-POP Official", views: 152000000, duration: "03:48" },
-      { title: "역대급 라이브 무대 모음", channel: "MUSIC LIVE", views: 68000000, duration: "21:10" },
-      { title: "감성 발라드 플레이리스트 1시간", channel: "밤에 듣는 노래", views: 41000000, duration: "58:22" },
-      { title: "요즘 대세 아이돌 커버 댄스", channel: "댄스타임", views: 33000000, duration: "02:57" },
-      { title: "버스킹 라이브 레전드 무대", channel: "거리의 가수", views: 19000000, duration: "05:41" },
-      { title: "노래방 필수곡 TOP 20", channel: "노래방차트", views: 12000000, duration: "18:33" },
-      { title: "잔잔한 재즈 카페 음악", channel: "카페뮤직", views: 8700000, duration: "1:12:04" },
-      { title: "드라이브할 때 듣는 신나는 팝송", channel: "드라이브뮤직", views: 6400000, duration: "42:19" },
-    ],
-  },
-  {
-    key: "variety",
-    label: "🎪 예능",
-    videos: [
-      { title: "역대급 예능 하이라이트 몰아보기", channel: "예능 클립실", views: 89000000, duration: "18:12" },
-      { title: "빵 터지는 리액션 명장면 모음", channel: "웃음창고", views: 54000000, duration: "12:47" },
-      { title: "게스트 폭소 토크쇼 하이라이트", channel: "토크왕", views: 37000000, duration: "15:22" },
-      { title: "복불복 게임 레전드 편", channel: "예능 클립실", views: 26000000, duration: "20:05" },
-      { title: "리얼 야생 서바이벌 명장면", channel: "야생예능", views: 18000000, duration: "16:38" },
-      { title: "아이돌 예능 입담 모음", channel: "웃음창고", views: 13000000, duration: "11:14" },
-      { title: "심야 라디오 스타 명대사", channel: "토크왕", views: 9200000, duration: "09:51" },
-      { title: "커플 관찰 예능 하이라이트", channel: "연애관찰", views: 7100000, duration: "14:03" },
-    ],
-  },
-  {
-    key: "mukbang",
-    label: "🍜 먹방",
-    videos: [
-      { title: "1억 뷰 먹방 레전드 모음", channel: "먹방왕TV", views: 45000000, duration: "22:37" },
-      { title: "매운 라면 챌린지 도전", channel: "매운맛중독", views: 31000000, duration: "13:09" },
-      { title: "대왕 해산물 한 상 먹방", channel: "바다밥상", views: 24000000, duration: "18:44" },
-      { title: "편의점 신상 다 먹어보기", channel: "편의점탐험대", views: 17000000, duration: "15:26" },
-      { title: "길거리 음식 투어 먹방", channel: "길거리미식가", views: 12000000, duration: "20:11" },
-      { title: "디저트 무한리필 먹방", channel: "단거러버", views: 8900000, duration: "12:33" },
-      { title: "혼밥 야식 먹방 ASMR", channel: "야식요정", views: 6300000, duration: "16:58" },
-      { title: "세계 각국 라면 먹어보기", channel: "라면덕후", views: 4800000, duration: "14:47" },
-    ],
-  },
-  {
-    key: "game",
-    label: "🎮 게임",
-    videos: [
-      { title: "게임 실황 명장면 베스트", channel: "게임하는곰", views: 21000000, duration: "14:05" },
-      { title: "신작 게임 첫 플레이 리뷰", channel: "게임리뷰어", views: 15000000, duration: "23:41" },
-      { title: "역대급 클러치 하이라이트", channel: "e스포츠클립", views: 12000000, duration: "10:52" },
-      { title: "초보 탈출 공략 가이드", channel: "게임선생", views: 8600000, duration: "18:19" },
-      { title: "친구들과 웃긴 합방 순간", channel: "게임하는곰", views: 6900000, duration: "16:37" },
-      { title: "숨겨진 명작 인디게임 추천", channel: "인디게이머", views: 4500000, duration: "12:24" },
-      { title: "프로게이머 실력 감상", channel: "e스포츠클립", views: 3800000, duration: "09:48" },
-      { title: "레트로 게임 추억 여행", channel: "옛날게임관", views: 2700000, duration: "20:33" },
-    ],
-  },
-  {
-    key: "vlog",
-    label: "📷 브이로그",
-    videos: [
-      { title: "브이로그 | 나의 하루 루틴", channel: "데일리 소소", views: 9800000, duration: "10:26" },
-      { title: "직장인 퇴근 후 자취 브이로그", channel: "혼자살기", views: 7300000, duration: "12:11" },
-      { title: "여행 브이로그 | 국내 가성비 코스", channel: "여행가방", views: 6100000, duration: "16:50" },
-      { title: "댕댕이 반응 모음 (심장주의)", channel: "펫스타그램", views: 5400000, duration: "07:18" },
-      { title: "카페 창업 준비 브이로그", channel: "사장님일기", views: 3900000, duration: "14:29" },
-      { title: "미니멀 라이프 정리 브이로그", channel: "비움생활", views: 2800000, duration: "11:43" },
-      { title: "육아 브이로그 | 아이와 하루", channel: "육아일상", views: 2100000, duration: "13:05" },
-      { title: "10분 완성 초간단 자취요리", channel: "혼밥연구소", views: 1600000, duration: "09:33" },
-    ],
-  },
+// ─────────────────── 콜라보 추천: 협업 가능한 영상 ───────────────────
+const COLLAB_VIDEOS: Video[] = [
+  // 국내
+  { title: "병원·의료진 협업 건강 콘텐츠 사례", channel: "메디컬토크", views: 8200000, duration: "14:22", region: "domestic" },
+  { title: "헬스 트레이너 콜라보 운동 루틴", channel: "핏콜라보", views: 6400000, duration: "16:08", region: "domestic" },
+  { title: "크리에이터 합방 콜라보 하이라이트", channel: "콜라보하우스", views: 5100000, duration: "18:47", region: "domestic" },
+  { title: "전문가 인터뷰 콜라보 시리즈", channel: "인터뷰룸", views: 3700000, duration: "21:15", region: "domestic" },
+  { title: "브랜드 협업 광고 콜라보 잘한 사례", channel: "마케팅클립", views: 2900000, duration: "12:39", region: "domestic" },
+  { title: "유튜버 챌린지 릴레이 콜라보", channel: "챌린지연합", views: 2300000, duration: "10:52", region: "domestic" },
+  { title: "게스트 초대 토크 콜라보", channel: "토크게스트", views: 1800000, duration: "24:03", region: "domestic" },
+  { title: "다른 채널과 Q&A 맞교환 콜라보", channel: "소통방송", views: 1400000, duration: "15:31", region: "domestic" },
+  { title: "지역 병원 소개 콜라보 브이로그", channel: "로컬헬스", views: 980000, duration: "13:18", region: "domestic" },
+  { title: "팬 참여형 콜라보 이벤트 기획", channel: "팬미팅TV", views: 720000, duration: "11:47", region: "domestic" },
+  // 해외
+  { title: "Doctor x YouTuber Health Collab", channel: "MedTalk", views: 11000000, duration: "15:44", region: "overseas" },
+  { title: "Fitness Trainer Collab Workout", channel: "FitCollab", views: 7300000, duration: "17:26", region: "overseas" },
+  { title: "Creator Collab Challenge Compilation", channel: "CollabHouse", views: 5600000, duration: "19:12", region: "overseas" },
+  { title: "Expert Guest Interview Series", channel: "TalkRoom", views: 3400000, duration: "22:38", region: "overseas" },
+  { title: "Brand Partnership Case Study", channel: "MarketingClips", views: 2100000, duration: "13:05", region: "overseas" },
+  { title: "Cross-Channel Q&A Collab", channel: "CommunityCast", views: 1500000, duration: "14:57", region: "overseas" },
 ];
 
 // ────────────────────────────── 컴포넌트 ──────────────────────────────
-type TabKey = "orthopedic" | "general";
+type TabKey = "orthopedic" | "collab";
 
 export default function Page() {
+  const [region, setRegion] = useState<Region>("domestic");
   const [tab, setTab] = useState<TabKey>("orthopedic");
   const [orthoCat, setOrthoCat] = useState<string>(ORTHO_CATEGORIES[0].key);
   const [age, setAge] = useState<number | "all">("all");
-  const [genCat, setGenCat] = useState<string>(GENERAL_CATEGORIES[0].key);
 
-  // 현재 탭에 보여줄 영상 목록 (조회수 내림차순)
+  // 현재 조건에 맞는 영상 목록 (조회수 내림차순)
   let videos: Video[] = [];
   if (tab === "orthopedic") {
     const cat = ORTHO_CATEGORIES.find((c) => c.key === orthoCat);
     videos = (cat?.videos ?? []).filter(
-      (v) => age === "all" || v.ages?.includes(age)
+      (v) =>
+        v.region === region && (age === "all" || v.ages?.includes(age))
     );
   } else {
-    const cat = GENERAL_CATEGORIES.find((c) => c.key === genCat);
-    videos = cat?.videos ?? [];
+    videos = COLLAB_VIDEOS.filter((v) => v.region === region);
   }
   videos = [...videos].sort((a, b) => b.views - a.views);
 
@@ -239,18 +238,40 @@ export default function Page() {
         </p>
         <h2 className="mt-1 text-2xl font-bold">🎬 인기 영상 모음</h2>
         <p className="mt-2 max-w-2xl text-sm text-blue-50">
-          <b>정형외과</b>는 부위·나이대별로, <b>일반 인기 영상</b>은 카테고리별로
-          모았습니다. 모든 목록은 조회수순으로 정렬됩니다. (샘플 데이터 · YouTube
-          API 미연동)
+          <b>국내/해외</b>를 골라 <b>정형외과</b>(부위·나이대별)와{" "}
+          <b>콜라보 추천</b> 영상을 살펴보세요. 모든 목록은 조회수순으로
+          정렬됩니다. (샘플 데이터 · YouTube API 미연동)
         </p>
       </section>
 
-      {/* 메인 탭 */}
+      {/* 국내/해외 토글 (전체 적용) */}
       <div className="mb-5 inline-flex rounded-xl border border-neutral-200 bg-neutral-100 p-1 dark:border-neutral-800 dark:bg-neutral-900">
         {(
           [
+            { key: "domestic", label: "🇰🇷 국내" },
+            { key: "overseas", label: "🌍 해외" },
+          ] as const
+        ).map((r) => (
+          <button
+            key={r.key}
+            onClick={() => setRegion(r.key)}
+            className={`rounded-lg px-5 py-2 text-sm font-semibold transition-colors ${
+              region === r.key
+                ? "bg-white text-indigo-600 shadow dark:bg-neutral-950 dark:text-indigo-400"
+                : "text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
+            }`}
+          >
+            {r.label}
+          </button>
+        ))}
+      </div>
+
+      {/* 메인 탭 */}
+      <div className="mb-5 flex flex-wrap gap-2">
+        {(
+          [
             { key: "orthopedic", label: "🩺 정형외과" },
-            { key: "general", label: "🔥 일반 인기 영상" },
+            { key: "collab", label: "🤝 콜라보 추천" },
           ] as const
         ).map((t) => (
           <button
@@ -258,8 +279,8 @@ export default function Page() {
             onClick={() => setTab(t.key)}
             className={`rounded-lg px-5 py-2 text-sm font-semibold transition-colors ${
               tab === t.key
-                ? "bg-white text-blue-600 shadow dark:bg-neutral-950 dark:text-blue-400"
-                : "text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200"
+                ? "bg-neutral-900 text-white dark:bg-white dark:text-neutral-900"
+                : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200 dark:bg-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800"
             }`}
           >
             {t.label}
@@ -307,27 +328,17 @@ export default function Page() {
         </div>
       )}
 
-      {/* 일반 인기 영상 필터: 카테고리 */}
-      {tab === "general" && (
-        <div className="mb-5">
-          <p className="mb-2 text-xs font-semibold text-neutral-400">카테고리</p>
-          <div className="flex flex-wrap gap-2">
-            {GENERAL_CATEGORIES.map((c) => (
-              <button
-                key={c.key}
-                onClick={() => setGenCat(c.key)}
-                className={pill(genCat === c.key)}
-              >
-                {c.label}
-              </button>
-            ))}
-          </div>
-        </div>
+      {/* 콜라보 탭 안내 */}
+      {tab === "collab" && (
+        <p className="mb-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+          🤝 다른 채널·전문가와 <b>콜라보(협업)</b> 하기 좋은 영상만 모았습니다.
+        </p>
       )}
 
       {/* 정렬/개수 안내 */}
       <p className="mb-4 text-xs text-neutral-400">
-        조회수 높은 순으로 정렬됨 · 총 {videos.length}개
+        {region === "domestic" ? "국내" : "해외"} · 조회수 높은 순으로 정렬됨 · 총{" "}
+        {videos.length}개
       </p>
 
       {/* 카드 갤러리 */}
@@ -335,14 +346,14 @@ export default function Page() {
         <div className="rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 p-10 text-center dark:border-neutral-700 dark:bg-neutral-900">
           <div className="text-4xl">🔍</div>
           <p className="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
-            선택한 나이대에 맞는 영상이 없어요. 다른 나이대나 부위를 골라보세요.
+            조건에 맞는 영상이 없어요. 국내/해외나 나이대·부위를 바꿔보세요.
           </p>
         </div>
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {videos.map((v, i) => (
             <article
-              key={`${tab}-${orthoCat}-${genCat}-${i}`}
+              key={`${tab}-${region}-${orthoCat}-${i}`}
               className="group flex flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white transition-shadow hover:shadow-lg dark:border-neutral-800 dark:bg-neutral-950"
             >
               {/* 썸네일 (그라데이션 대체) */}
