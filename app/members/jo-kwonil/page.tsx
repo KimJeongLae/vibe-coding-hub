@@ -132,6 +132,10 @@ const ctrFmt = (m: Metrics) =>
   m.impressions > 0 ? ((m.clicks / m.impressions) * 100).toFixed(2) + "%" : "—";
 // 성과 저조(낭비) 판정: 비용은 썼는데 매출이 0이거나 비용보다 적음(ROAS<1)
 const isWasteful = (m: Metrics) => m.cost > 0 && (m.revenue === 0 || m.revenue < m.cost);
+// 정액제(브랜드검색 등): 노출·클릭은 있는데 광고비(salesAmt)가 0으로 내려옴
+// → 네이버가 클릭당 광고비를 제공하지 않는 상품이므로 ₩0이 아니라 '정액제'로 표기
+const isFlatRate = (m: Metrics) => m.cost === 0 && (m.clicks > 0 || m.impressions > 0);
+const FLAT_TITLE = "브랜드검색 등 정액제 상품은 클릭당 광고비(비용)가 네이버 API로 제공되지 않습니다.";
 
 // 네이버 실데이터 API 응답 타입
 type NaverResp = {
@@ -820,12 +824,12 @@ function DetailView({
                     </div>
                     {/* 모바일 축약 지표 */}
                     <div className="mt-0.5 text-[11px] text-neutral-400 lg:hidden" style={{ fontVariantNumeric: "tabular-nums" }}>
-                      노출 {formatCompact(g.metrics.impressions, false)} · 클릭 {formatCompact(g.metrics.clicks, false)} · 비용 {formatCompact(g.metrics.cost, true)} · CTR {ctrFmt(g.metrics)}
+                      노출 {formatCompact(g.metrics.impressions, false)} · 클릭 {formatCompact(g.metrics.clicks, false)} · 비용 {isFlatRate(g.metrics) ? "정액제" : formatCompact(g.metrics.cost, true)} · CTR {ctrFmt(g.metrics)}
                     </div>
                   </div>
                   <span className="hidden w-16 text-right text-xs text-neutral-500 dark:text-neutral-400 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{formatCompact(g.metrics.impressions, false)}</span>
                   <span className="hidden w-14 text-right text-xs text-neutral-500 dark:text-neutral-400 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{formatCompact(g.metrics.clicks, false)}</span>
-                  <span className="hidden w-20 text-right text-xs font-medium text-neutral-700 dark:text-neutral-200 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{formatCompact(g.metrics.cost, true)}</span>
+                  <span className="hidden w-20 text-right text-xs font-medium text-neutral-700 dark:text-neutral-200 lg:block" style={{ fontVariantNumeric: "tabular-nums" }} title={isFlatRate(g.metrics) ? FLAT_TITLE : undefined}>{isFlatRate(g.metrics) ? <span className="text-neutral-400">정액제</span> : formatCompact(g.metrics.cost, true)}</span>
                   <span className="hidden w-16 text-right text-xs text-neutral-500 dark:text-neutral-400 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{cpcFmt(g.metrics)}</span>
                   <span className="hidden w-14 text-right text-xs text-neutral-500 dark:text-neutral-400 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{ctrFmt(g.metrics)}</span>
                   <span className="hidden w-12 text-right text-xs text-neutral-500 dark:text-neutral-400 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{formatValue(g.metrics.conversions, false)}</span>
@@ -870,7 +874,9 @@ function DetailView({
               <li key={k.id} className="flex items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-950">
                 <span className="w-5 text-center text-xs font-bold text-neutral-400">{i + 1}</span>
                 <div className="min-w-0 flex-1 truncate text-sm font-medium">{k.keyword}</div>
-                <span className="w-24 text-right text-sm text-neutral-600 dark:text-neutral-300" style={{ fontVariantNumeric: "tabular-nums" }}>{formatValue(k.metrics.cost, true)}</span>
+                <span className="w-24 text-right text-sm text-neutral-600 dark:text-neutral-300" style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {isFlatRate(k.metrics) ? <span className="text-xs text-neutral-400" title={FLAT_TITLE}>정액제</span> : formatValue(k.metrics.cost, true)}
+                </span>
                 <span className="w-24 text-right text-sm font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>{formatValue(k.metrics.revenue, true)}</span>
               </li>
             ))}
