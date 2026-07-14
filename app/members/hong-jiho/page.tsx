@@ -35,6 +35,30 @@ const QTY_KEYS = ["재고", "수량", "현재고", "잔량", "stock", "qty"];
 // 아예 수집/표시하지 않을 제품명 (사용자 요청)
 const EXCLUDE_NAMES = ["기타상품"];
 
+// 표에 고정으로 보여줄 제품 순서. 여기 없는 제품은 아래에 발견 순서대로 쌓임.
+// 실제 이름의 '닥터써클' 접두사·공백·언더바(_)를 무시하고 끝부분(suffix)으로 매칭.
+const PRODUCT_ORDER = [
+  "경추베개",
+  "경추베개커버",
+  "허리베개",
+  "차량용등받이쿠션",
+  "차량용목쿠션",
+  "허리보호대S",
+  "허리보호대M",
+  "허리보호대L",
+  "허리보호대XL",
+];
+function normalizeName(name: string) {
+  return name.replace(/[\s_]/g, "").toLowerCase();
+}
+function orderRank(name: string) {
+  const n = normalizeName(name);
+  for (let i = 0; i < PRODUCT_ORDER.length; i++) {
+    if (n.endsWith(normalizeName(PRODUCT_ORDER[i]))) return i;
+  }
+  return PRODUCT_ORDER.length; // 목록에 없으면 맨 뒤
+}
+
 // ── CSV 파싱 (따옴표/줄바꿈 처리) ─────────────────────────────
 function parseCSV(text: string): string[][] {
   const rows: string[][] = [];
@@ -501,25 +525,33 @@ function fmt1(n: number | null) {
     maximumFractionDigits: 1,
   });
 }
+// 상태 기준: 소진까지 60일 이하 = 부족(빨강), 99일 이하 = 보통(노랑), 100일 이상 = 여유(초록)
+// badgeCls: 상태 뱃지 색 / textCls: 소진까지·예상 소진일 글자 색
 function statusFor(daysLeft: number | null) {
   if (daysLeft === null)
     return {
       label: "데이터 부족",
-      cls: "bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400",
+      badgeCls:
+        "bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400",
+      textCls: "text-neutral-400",
     };
-  if (daysLeft <= 7)
+  if (daysLeft <= 60)
     return {
-      label: "소진 임박",
-      cls: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+      label: "부족",
+      badgeCls: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+      textCls: "text-red-600 dark:text-red-400",
     };
-  if (daysLeft <= 14)
+  if (daysLeft <= 99)
     return {
-      label: "주의",
-      cls: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+      label: "보통",
+      badgeCls: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+      textCls: "text-amber-600 dark:text-amber-400",
     };
   return {
     label: "여유",
-    cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+    badgeCls:
+      "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+    textCls: "text-emerald-600 dark:text-emerald-400",
   };
 }
 
@@ -572,7 +604,11 @@ export default function Page() {
       for (const name of Object.keys(s.stock))
         if (!seen.includes(name) && !includesAny(name, EXCLUDE_NAMES))
           seen.push(name);
-    return seen;
+    // 고정 순서 우선, 목록에 없는 제품은 발견 순서대로 뒤에 정렬
+    return seen
+      .map((name, i) => ({ name, i, rank: orderRank(name) }))
+      .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.i - b.i))
+      .map((x) => x.name);
   }, [sorted]);
   const dates = useMemo(() => sorted.map((s) => s.date), [sorted]);
   // 표시용 날짜: 가장 최근이 왼쪽 (내림차순)
@@ -584,7 +620,7 @@ export default function Page() {
   }, [products, sorted]);
 
   const urgentCount = products.filter(
-    (p) => metrics[p].daysLeft !== null && metrics[p].daysLeft! <= 7,
+    (p) => metrics[p].daysLeft !== null && metrics[p].daysLeft! <= 60,
   ).length;
   const latestDate = dates.length ? dates[dates.length - 1] : "-";
 
@@ -661,7 +697,7 @@ export default function Page() {
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <SummaryCard label="관리 제품" value={`${products.length}`} unit="개" />
         <SummaryCard
-          label="소진 임박(≤7일)"
+          label="부족(≤60일)"
           value={`${urgentCount}`}
           unit="개"
           accent={urgentCount > 0 ? "danger" : "ok"}
@@ -758,14 +794,12 @@ export default function Page() {
                     현재고
                   </th>
                   <th className="px-4 py-3 text-right font-semibold leading-tight">
-                    7일 평균
-                    <br />
-                    소진
+                    <div className="whitespace-nowrap">7일 평균</div>
+                    <div className="whitespace-nowrap">소진량</div>
                   </th>
                   <th className="px-4 py-3 text-right font-semibold leading-tight">
-                    30일 평균
-                    <br />
-                    소진
+                    <div className="whitespace-nowrap">30일 평균</div>
+                    <div className="whitespace-nowrap">소진량</div>
                   </th>
                   <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">
                     최고 소진
@@ -825,7 +859,7 @@ export default function Page() {
                       >
                         {p}
                       </th>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums">
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-bold tabular-nums text-red-600 dark:text-red-400">
                         {m.current.toLocaleString()}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
@@ -840,19 +874,19 @@ export default function Page() {
                       <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-neutral-500 dark:text-neutral-400">
                         {fmt1(m.minDaily)}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-center tabular-nums">
-                        {m.daysLeft !== null ? (
-                          <span className="font-semibold">{m.daysLeft}일</span>
-                        ) : (
-                          "-"
-                        )}
+                      <td
+                        className={`whitespace-nowrap px-4 py-3 text-center font-semibold tabular-nums ${s.textCls}`}
+                      >
+                        {m.daysLeft !== null ? `${m.daysLeft}일` : "-"}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-center text-neutral-500 dark:text-neutral-400">
+                      <td
+                        className={`whitespace-nowrap px-4 py-3 text-center font-medium ${s.textCls}`}
+                      >
                         {m.depletionDate ?? "-"}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span
-                          className={`inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ${s.cls}`}
+                          className={`inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ${s.badgeCls}`}
                         >
                           {s.label}
                         </span>
@@ -883,7 +917,8 @@ export default function Page() {
         <b>7일 / 30일 평균</b>은 최근 해당 기간의 일평균, <b>최고·최소 소진</b>은 기록된
         전체 기간 중 하루 최대·최소 소진량입니다. <b>소진까지·예상 소진일</b>은 최근
         7일 평균(없으면 30일 평균) 기준으로 계산합니다. 출고량 데이터가 없으면 재고
-        감소분으로 추정합니다.
+        감소분으로 추정합니다. <b>상태</b>는 소진까지 60일 이하 <b>부족(빨강)</b>, 99일 이하{" "}
+        <b>보통(노랑)</b>, 100일 이상 <b>여유(초록)</b> 입니다.
       </p>
       </div>
     </MemberShell>
