@@ -8,6 +8,7 @@ import MemberShell from "@/components/MemberShell";
 // ⚠️ YouTube API 미연동 — 아래 샘플 데이터로 화면과 필터/탭 전환만 동작합니다.
 
 type Region = "domestic" | "overseas";
+type Platform = "youtube" | "instagram";
 
 type Video = {
   title: string;
@@ -16,6 +17,7 @@ type Video = {
   duration: string;
   region: Region;
   ages?: number[]; // 정형외과 영상의 추천 나이대 (10~70)
+  platform?: Platform; // 제품 판매 추천 영상의 플랫폼
 };
 
 type Category = { key: string; label: string; videos: Video[] };
@@ -180,26 +182,42 @@ const ORTHO_CATEGORIES: Category[] = [
 
 // ─────────────────── 제품 판매 추천: 판매에 적합한 영상 (연예인 광고 제외) ───────────────────
 // ⚠️ 연예인 출연 광고 영상은 제외하고, 실사용 리뷰·언박싱·라이브커머스 등
-//    제품을 직접 파는 데 효과적인 콘텐츠만 담았습니다.
+//    제품을 직접 파는 데 효과적인 콘텐츠만 담았습니다. (유튜브 / 인스타그램 구분)
 const SALES_VIDEOS: Video[] = [
-  // 국내
-  { title: "신제품 언박싱 & 첫 사용 후기", channel: "언박싱랩", views: 7600000, duration: "12:41", region: "domestic" },
-  { title: "라이브 커머스 판매 대박 사례 분석", channel: "라이브커머스TV", views: 6100000, duration: "16:22", region: "domestic" },
-  { title: "제품 비교 리뷰 TOP 5 (구매 가이드)", channel: "리뷰노트", views: 5300000, duration: "14:08", region: "domestic" },
-  { title: "실사용 한 달, 솔직 장단점 후기", channel: "솔직리뷰", views: 4200000, duration: "11:53", region: "domestic" },
-  { title: "헬스케어 제품 실사용 후기", channel: "헬스템리뷰", views: 3400000, duration: "13:17", region: "domestic" },
-  { title: "공동구매 인기 상품 소개 & 시연", channel: "공구마켓", views: 2700000, duration: "10:39", region: "domestic" },
-  { title: "가성비 아이템 추천 모음 (실구매)", channel: "가성비헌터", views: 2100000, duration: "15:44", region: "domestic" },
-  { title: "제품 사용법 튜토리얼 (개봉→세팅)", channel: "하우투샵", views: 1600000, duration: "09:26", region: "domestic" },
-  { title: "구매 전 꼭 봐야 할 단점 리뷰", channel: "팩트리뷰", views: 1200000, duration: "12:05", region: "domestic" },
-  { title: "홈쇼핑 스타일 제품 시연 & 판매", channel: "시연왕", views: 880000, duration: "17:31", region: "domestic" },
-  // 해외
-  { title: "Product Unboxing & First Impressions", channel: "UnboxLab", views: 10000000, duration: "13:44", region: "overseas" },
-  { title: "Live Shopping Sales Highlights", channel: "LiveCommerceTV", views: 6800000, duration: "18:12", region: "overseas" },
-  { title: "Honest Product Review (30 Days)", channel: "HonestReview", views: 5100000, duration: "14:57", region: "overseas" },
-  { title: "Top 5 Product Comparison (Buying Guide)", channel: "ReviewNote", views: 3300000, duration: "16:05", region: "overseas" },
-  { title: "How-To Product Tutorial (Setup)", channel: "HowToShop", views: 2000000, duration: "09:38", region: "overseas" },
-  { title: "Best Value Gadgets Roundup", channel: "ValueHunter", views: 1400000, duration: "15:22", region: "overseas" },
+  // ── 유튜브 · 국내 ──
+  { title: "신제품 언박싱 & 첫 사용 후기", channel: "언박싱랩", views: 7600000, duration: "12:41", region: "domestic", platform: "youtube" },
+  { title: "라이브 커머스 판매 대박 사례 분석", channel: "라이브커머스TV", views: 6100000, duration: "16:22", region: "domestic", platform: "youtube" },
+  { title: "제품 비교 리뷰 TOP 5 (구매 가이드)", channel: "리뷰노트", views: 5300000, duration: "14:08", region: "domestic", platform: "youtube" },
+  { title: "실사용 한 달, 솔직 장단점 후기", channel: "솔직리뷰", views: 4200000, duration: "11:53", region: "domestic", platform: "youtube" },
+  { title: "헬스케어 제품 실사용 후기", channel: "헬스템리뷰", views: 3400000, duration: "13:17", region: "domestic", platform: "youtube" },
+  { title: "공동구매 인기 상품 소개 & 시연", channel: "공구마켓", views: 2700000, duration: "10:39", region: "domestic", platform: "youtube" },
+  { title: "가성비 아이템 추천 모음 (실구매)", channel: "가성비헌터", views: 2100000, duration: "15:44", region: "domestic", platform: "youtube" },
+  { title: "제품 사용법 튜토리얼 (개봉→세팅)", channel: "하우투샵", views: 1600000, duration: "09:26", region: "domestic", platform: "youtube" },
+  { title: "구매 전 꼭 봐야 할 단점 리뷰", channel: "팩트리뷰", views: 1200000, duration: "12:05", region: "domestic", platform: "youtube" },
+  { title: "홈쇼핑 스타일 제품 시연 & 판매", channel: "시연왕", views: 880000, duration: "17:31", region: "domestic", platform: "youtube" },
+  // ── 유튜브 · 해외 ──
+  { title: "Product Unboxing & First Impressions", channel: "UnboxLab", views: 10000000, duration: "13:44", region: "overseas", platform: "youtube" },
+  { title: "Live Shopping Sales Highlights", channel: "LiveCommerceTV", views: 6800000, duration: "18:12", region: "overseas", platform: "youtube" },
+  { title: "Honest Product Review (30 Days)", channel: "HonestReview", views: 5100000, duration: "14:57", region: "overseas", platform: "youtube" },
+  { title: "Top 5 Product Comparison (Buying Guide)", channel: "ReviewNote", views: 3300000, duration: "16:05", region: "overseas", platform: "youtube" },
+  { title: "How-To Product Tutorial (Setup)", channel: "HowToShop", views: 2000000, duration: "09:38", region: "overseas", platform: "youtube" },
+  { title: "Best Value Gadgets Roundup", channel: "ValueHunter", views: 1400000, duration: "15:22", region: "overseas", platform: "youtube" },
+
+  // ── 인스타그램 · 국내 ──
+  { title: "릴스로 제품 30초 소개 (전환율 UP)", channel: "릴스마케팅", views: 5400000, duration: "0:30", region: "domestic", platform: "instagram" },
+  { title: "인스타 공동구매 후기 릴스 모음", channel: "공구스타그램", views: 3900000, duration: "0:45", region: "domestic", platform: "instagram" },
+  { title: "제품 언박싱 릴스 (짧고 강하게)", channel: "언박싱릴스", views: 3100000, duration: "0:38", region: "domestic", platform: "instagram" },
+  { title: "사용 전후 비교 릴스", channel: "비포애프터", views: 2600000, duration: "0:52", region: "domestic", platform: "instagram" },
+  { title: "인스타 라이브 쇼핑 하이라이트", channel: "라이브샵그램", views: 1900000, duration: "1:12", region: "domestic", platform: "instagram" },
+  { title: "1분 제품 사용법 릴스", channel: "꿀팁릴스", views: 1400000, duration: "0:58", region: "domestic", platform: "instagram" },
+  { title: "인플루언서 실사용 릴스 (비연예인)", channel: "리뷰그램", views: 980000, duration: "0:41", region: "domestic", platform: "instagram" },
+  { title: "제품 스타일링 릴스", channel: "스타일샵", views: 720000, duration: "0:35", region: "domestic", platform: "instagram" },
+  // ── 인스타그램 · 해외 ──
+  { title: "30-Second Product Reel (High Convert)", channel: "ReelsMarketing", views: 8200000, duration: "0:30", region: "overseas", platform: "instagram" },
+  { title: "Instagram Live Shopping Highlights", channel: "LiveShopGram", views: 4700000, duration: "1:20", region: "overseas", platform: "instagram" },
+  { title: "Before & After Product Reel", channel: "BeforeAfter", views: 3600000, duration: "0:48", region: "overseas", platform: "instagram" },
+  { title: "Unboxing Reels Compilation", channel: "UnboxReels", views: 2400000, duration: "0:55", region: "overseas", platform: "instagram" },
+  { title: "Influencer Honest Reel (non-celebrity)", channel: "ReviewGram", views: 1500000, duration: "0:42", region: "overseas", platform: "instagram" },
 ];
 
 // ────────────────────────────── 컴포넌트 ──────────────────────────────
@@ -210,6 +228,7 @@ export default function Page() {
   const [tab, setTab] = useState<TabKey>("orthopedic");
   const [orthoCat, setOrthoCat] = useState<string>(ORTHO_CATEGORIES[0].key);
   const [age, setAge] = useState<number | "all">("all");
+  const [platform, setPlatform] = useState<Platform>("youtube");
 
   // 현재 조건에 맞는 영상 목록 (조회수 내림차순)
   let videos: Video[] = [];
@@ -220,7 +239,9 @@ export default function Page() {
         v.region === region && (age === "all" || v.ages?.includes(age))
     );
   } else {
-    videos = SALES_VIDEOS.filter((v) => v.region === region);
+    videos = SALES_VIDEOS.filter(
+      (v) => v.region === region && v.platform === platform
+    );
   }
   videos = [...videos].sort((a, b) => b.views - a.views);
 
@@ -330,12 +351,33 @@ export default function Page() {
         </div>
       )}
 
-      {/* 제품 판매 탭 안내 */}
+      {/* 제품 판매 탭: 플랫폼(유튜브/인스타그램) + 안내 */}
       {tab === "sales" && (
-        <p className="mb-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-          🛒 <b>제품 판매</b>에 효과적인 영상(리뷰·언박싱·라이브커머스 등)만
-          모았습니다. <b>연예인 광고 영상은 제외</b>했습니다.
-        </p>
+        <>
+          <div className="mb-5">
+            <p className="mb-2 text-xs font-semibold text-neutral-400">플랫폼</p>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  { key: "youtube", label: "▶️ 유튜브" },
+                  { key: "instagram", label: "📸 인스타그램" },
+                ] as const
+              ).map((p) => (
+                <button
+                  key={p.key}
+                  onClick={() => setPlatform(p.key)}
+                  className={pill(platform === p.key)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="mb-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+            🛒 <b>제품 판매</b>에 효과적인 영상(리뷰·언박싱·라이브커머스 등)만
+            모았습니다. <b>연예인 광고 영상은 제외</b>했습니다.
+          </p>
+        </>
       )}
 
       {/* 정렬/개수 안내 */}
