@@ -120,7 +120,17 @@ export async function GET(request: Request) {
     const campaignIds = campaigns.map((c) => c.nccCampaignId);
     const campaignStats = await getStats(campaignIds, since, until);
 
-    // 2) 광고그룹 (그룹 랭킹용)
+    // 캠페인 유형(campaignTp) → 상품 라벨 (파워링크/쇼핑검색/브랜드검색 등)
+    const PRODUCT_LABEL: Record<string, string> = {
+      WEB_SITE: "파워링크",
+      SHOPPING: "쇼핑검색",
+      BRAND_SEARCH: "브랜드검색",
+      POWER_CONTENTS: "파워콘텐츠",
+      PLACE: "플레이스",
+    };
+    const productOf = (tp: string) => PRODUCT_LABEL[tp] ?? tp;
+
+    // 2) 광고그룹 (그룹 랭킹용) — 각 그룹에 소속 캠페인 유형을 붙여둠
     const adgroupsNested = await Promise.all(
       campaigns.map((c) => {
         const s = new URLSearchParams();
@@ -128,7 +138,9 @@ export async function GET(request: Request) {
         return naverGet<{ nccAdgroupId: string; name: string; nccCampaignId: string }[]>(
           "/ncc/adgroups",
           s,
-        ).catch(() => []);
+        )
+          .then((gs) => gs.map((g) => ({ ...g, campaignTp: c.campaignTp })))
+          .catch(() => [] as { nccAdgroupId: string; name: string; campaignTp: string }[]);
       }),
     );
     const adgroups = adgroupsNested.flat();
@@ -138,43 +150,53 @@ export async function GET(request: Request) {
       until,
     );
 
-    const groups = adgroups
+    const groupsFull = adgroups
       .map((g) => ({
         id: g.nccAdgroupId,
         name: g.name,
         type: "SA" as const,
+        product: productOf(g.campaignTp),
+        campaignTp: g.campaignTp,
         metrics: adgroupStats[g.nccAdgroupId] ?? { ...ZERO },
       }))
       .sort((a, b) => b.metrics.revenue - a.metrics.revenue || b.metrics.clicks - a.metrics.clicks);
 
-    // 3) 상위 그룹 3개의 키워드
-    const topGroups = groups.slice(0, 3);
-    const keywordsNested = await Promise.all(
-      topGroups.map((g) => {
-        const s = new URLSearchParams();
-        s.set("nccAdgroupId", g.id);
-        return naverGet<{ nccKeywordId: string; keyword: string; nccAdgroupId: string }[]>(
-          "/ncc/keywords",
-          s,
-        )
-          .then((ks) => ks.map((k) => ({ ...k, groupName: g.name })))
-          .catch(() => []);
+    // 3) 캠페인 유형별 고성과 키워드 (파워링크 / 쇼핑검색 / 브랜드검색)
+    //    유형별 매출 상위 그룹 3개의 키워드를 모아 유형별 상위 8개.
+    const KW_TYPES = ["WEB_SITE", "SHOPPING", "BRAND_SEARCH"];
+    const keywordsByType = await Promise.all(
+      KW_TYPES.map(async (tp) => {
+        const gs = groupsFull.filter((g) => g.campaignTp === tp).slice(0, 3);
+        if (gs.length === 0) return [];
+        const kwNested = await Promise.all(
+          gs.map((g) => {
+            const s = new URLSearchParams();
+            s.set("nccAdgroupId", g.id);
+            return naverGet<{ nccKeywordId: string; keyword: string }[]>("/ncc/keywords", s)
+              .then((ks) => ks.slice(0, 80).map((k) => ({ ...k, groupName: g.name })))
+              .catch(() => [] as { nccKeywordId: string; keyword: string; groupName: string }[]);
+          }),
+        );
+        const kwFlat = kwNested.flat();
+        const kwStats = await getStats(
+          kwFlat.map((k) => k.nccKeywordId).slice(0, 300),
+          since,
+          until,
+        );
+        return kwFlat
+          .map((k) => ({
+            id: k.nccKeywordId,
+            keyword: k.keyword,
+            group: k.groupName,
+            product: productOf(tp),
+            metrics: kwStats[k.nccKeywordId] ?? { ...ZERO },
+          }))
+          .filter((k) => k.metrics.clicks > 0 || k.metrics.impressions > 0 || k.metrics.revenue > 0)
+          .sort((a, b) => b.metrics.revenue - a.metrics.revenue)
+          .slice(0, 8);
       }),
     );
-    const kwList = keywordsNested.flat();
-    const keywordStats = await getStats(
-      kwList.map((k) => k.nccKeywordId),
-      since,
-      until,
-    );
-    const keywords = kwList
-      .map((k) => ({
-        id: k.nccKeywordId,
-        keyword: k.keyword,
-        group: k.groupName,
-        metrics: keywordStats[k.nccKeywordId] ?? { ...ZERO },
-      }))
-      .sort((a, b) => b.metrics.revenue - a.metrics.revenue);
+    const keywords = keywordsByType.flat();
 
     // SA 캠페인 총합
     const saTotal = campaignIds.reduce(
@@ -193,8 +215,10 @@ export async function GET(request: Request) {
         tp: c.campaignTp,
         metrics: campaignStats[c.nccCampaignId] ?? { ...ZERO },
       })),
-      groups: groups.slice(0, 10),
-      keywords: keywords.slice(0, 8),
+      groups: groupsFull
+        .slice(0, 10)
+        .map((g) => ({ id: g.id, name: g.name, type: g.type, product: g.product, metrics: g.metrics })),
+      keywords,
     });
   } catch (e) {
     return Response.json(

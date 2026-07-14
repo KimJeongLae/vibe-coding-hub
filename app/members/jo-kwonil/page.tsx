@@ -144,9 +144,12 @@ type NaverResp = {
   until: string;
   saTotal: Metrics;
   campaigns: { id: string; name: string; tp: string; metrics: Metrics }[];
-  groups: { id: string; name: string; type: "SA"; metrics: Metrics }[];
-  keywords: { id: string; keyword: string; group: string; metrics: Metrics }[];
+  groups: { id: string; name: string; type: "SA"; product?: string; metrics: Metrics }[];
+  keywords: { id: string; keyword: string; group: string; product?: string; metrics: Metrics }[];
 };
+
+// 고성과 키워드 탭 순서 (네이버 캠페인 유형)
+const KW_PRODUCT_ORDER = ["파워링크", "쇼핑검색", "브랜드검색", "파워콘텐츠"];
 
 // 선택한 기간 → 실제 날짜(YYYY-MM-DD)로 변환 (네이버 API 조회용)
 function rangeToDates(rangeKey: string, customStart: string, customEnd: string) {
@@ -627,6 +630,8 @@ function DetailView({
   const isReal = !!real;
   // 상위 그룹 SA/DA 필터 (뷰 전환은 클라이언트 상태로만 → 즉시 반응)
   const [gTypeFilter, setGTypeFilter] = useState<"all" | "SA" | "DA">("all");
+  // 고성과 키워드 캠페인 유형 탭 (파워링크/쇼핑검색/브랜드검색)
+  const [kwProduct, setKwProduct] = useState("파워링크");
 
   // SA는 실데이터(있으면), DA는 미연동이라 샘플 유지. 나머지 매체는 전체 샘플.
   const saSample = detail.campaigns.find((c) => c.type === "SA")!;
@@ -657,9 +662,16 @@ function DetailView({
   const maxGroupVal = Math.max(...groups.map((g) => gSort.calc(g.metrics)), 1);
 
   const keywordsSrc = real
-    ? real.keywords.map((k) => ({ id: k.id, keyword: k.keyword, group: k.group, metrics: k.metrics }))
-    : detail.keywords.map((k) => ({ ...k, metrics: scaleM(k.metrics, factor) }));
+    ? real.keywords.map((k) => ({ id: k.id, keyword: k.keyword, group: k.group, product: k.product, metrics: k.metrics }))
+    : detail.keywords.map((k) => ({ ...k, product: undefined as string | undefined, metrics: scaleM(k.metrics, factor) }));
+  // 캠페인 유형 탭 (실데이터일 때만): 파워링크/쇼핑검색/브랜드검색 3종 고정 노출
+  // (쇼핑검색은 키워드 단위 데이터가 없을 수 있으나, 탭은 항상 보여주고 안내문 처리)
+  const kwProducts = isReal
+    ? KW_PRODUCT_ORDER.filter((p) => p !== "파워콘텐츠" || keywordsSrc.some((k) => k.product === p))
+    : [];
+  const selectedKwProduct = kwProducts.includes(kwProduct) ? kwProduct : kwProducts[0];
   const keywords = [...keywordsSrc]
+    .filter((k) => !isReal || k.product === selectedKwProduct)
     .sort((a, b) => b.metrics.revenue - a.metrics.revenue)
     .slice(0, 8);
 
@@ -853,9 +865,9 @@ function DetailView({
 
       {/* 3) SA 키워드 / DA 소재 */}
       <section className="mt-8 grid gap-6 lg:grid-cols-2">
-        {/* SA 고성과 키워드 — #3 총비용·매출액만 표시 */}
+        {/* SA 고성과 키워드 — #3 총비용·매출액만, 캠페인 유형(파워링크/쇼핑검색/브랜드검색)별 탭 */}
         <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md px-2 py-0.5 text-xs font-bold text-white" style={{ background: TYPE_BADGE.SA.color }}>SA</span>
             <h3 className="font-semibold">고성과 키워드</h3>
             {isReal && (
@@ -863,6 +875,25 @@ function DetailView({
             )}
           </div>
           <p className="mt-1 text-xs text-neutral-400">검색광고 · 전환매출 기준 · 총비용 / 매출액</p>
+
+          {/* 캠페인 유형 탭 (실데이터일 때만) */}
+          {isReal && kwProducts.length > 0 && (
+            <div className="mt-3 inline-flex flex-wrap rounded-full border border-neutral-200 bg-neutral-100 p-1 dark:border-neutral-800 dark:bg-neutral-800">
+              {kwProducts.map((p) => {
+                const active = p === selectedKwProduct;
+                return (
+                  <button
+                    key={p}
+                    onClick={() => setKwProduct(p)}
+                    className={"rounded-full px-3 py-1.5 text-xs font-medium transition-colors " + (active ? "bg-blue-600 text-white shadow-sm" : "text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200")}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="mt-3 flex items-center gap-3 px-3 text-[11px] font-medium text-neutral-400">
             <span className="w-5" />
             <span className="min-w-0 flex-1">키워드</span>
@@ -881,6 +912,13 @@ function DetailView({
               </li>
             ))}
           </ol>
+          {keywords.length === 0 && (
+            <p className="mt-3 rounded-lg border border-dashed border-neutral-300 py-6 text-center text-xs text-neutral-400 dark:border-neutral-700">
+              {selectedKwProduct === "쇼핑검색"
+                ? "쇼핑검색은 키워드 단위 성과가 제공되지 않습니다 (상품/그룹 단위)."
+                : "표시할 키워드가 없습니다."}
+            </p>
+          )}
         </div>
 
         {/* DA 고성과 소재 */}
