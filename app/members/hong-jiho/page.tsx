@@ -478,8 +478,9 @@ function computeMetric(product: string, snaps: Snapshot[]): Metric {
     const vals = series.map((s) => s.v);
     const maxDaily = Math.max(...vals);
     const minDaily = Math.min(...vals);
-    // 소진까지/예상소진일은 최근 추세(7일 평균) 기준, 없으면 30일 평균
-    const rate = avg7 && avg7 > 0 ? avg7 : avg30 && avg30 > 0 ? avg30 : null;
+    // 소진까지/예상소진일은 30일 평균(안정적) 기준, 없으면 7일 평균으로 폴백.
+    // 30일 창은 데이터가 쌓일수록 완전한 4주+ 표본이 되어 예측이 정확해짐.
+    const rate = avg30 && avg30 > 0 ? avg30 : avg7 && avg7 > 0 ? avg7 : null;
     const daysLeft = rate ? Math.round(current / rate) : null;
     return {
       current,
@@ -562,6 +563,8 @@ export default function Page() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [detail, setDetail] = useState<string | null>(null); // 상세 달력 모달 대상 제품
+  const [calYM, setCalYM] = useState<{ y: number; m: number }>({ y: 2026, m: 0 });
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -611,12 +614,30 @@ export default function Page() {
       .map((x) => x.name);
   }, [sorted]);
   const dates = useMemo(() => sorted.map((s) => s.date), [sorted]);
-  // 표시용 날짜: 가장 최근이 왼쪽 (내림차순)
-  const displayDates = useMemo(() => [...dates].reverse(), [dates]);
   const metrics = useMemo(() => {
     const map: Record<string, Metric> = {};
     for (const p of products) map[p] = computeMetric(p, sorted);
     return map;
+  }, [products, sorted]);
+
+  // 제품별 날짜→{재고, 소진} 맵 + 날짜 목록(최신순) — 달력/상세표에 사용
+  const dayDataByProduct = useMemo(() => {
+    const res: Record<
+      string,
+      { map: Record<string, { stock?: number; out?: number }>; datesDesc: string[] }
+    > = {};
+    for (const p of products) {
+      const map: Record<string, { stock?: number; out?: number }> = {};
+      const ds: string[] = [];
+      for (const s of sorted) {
+        if (s.stock[p] !== undefined || s.out[p] !== undefined) {
+          map[s.date] = { stock: s.stock[p], out: s.out[p] };
+          ds.push(s.date);
+        }
+      }
+      res[p] = { map, datesDesc: ds.reverse() };
+    }
+    return res;
   }, [products, sorted]);
 
   const urgentCount = products.filter(
@@ -680,8 +701,22 @@ export default function Page() {
     }
   }
 
-  function removeDate(d: string) {
-    setSnapshots((prev) => prev.filter((s) => s.date !== d));
+  const latestYM = useMemo(() => {
+    const last = dates.length ? dates[dates.length - 1] : null;
+    if (!last) return { y: 2026, m: 0 };
+    const [y, m] = last.split("-").map(Number);
+    return { y, m: m - 1 };
+  }, [dates]);
+
+  function openDetail(p: string) {
+    setCalYM(latestYM); // 열 때 데이터 기준월로 시작
+    setDetail(p);
+  }
+  function stepMonth(delta: number) {
+    setCalYM((c) => {
+      const d = new Date(Date.UTC(c.y, c.m + delta, 1));
+      return { y: d.getUTCFullYear(), m: d.getUTCMonth() };
+    });
   }
   function resetAll() {
     setSnapshots([]);
@@ -783,8 +818,8 @@ export default function Page() {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-2xl border border-neutral-200 shadow-sm dark:border-neutral-800">
-            <table className="min-w-full border-collapse text-sm">
+          <div className="rounded-2xl border border-neutral-200 shadow-sm dark:border-neutral-800">
+            <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="bg-neutral-50 dark:bg-neutral-900">
                   <th className="sticky left-0 z-10 whitespace-nowrap bg-neutral-50 px-4 py-3 text-left font-semibold dark:bg-neutral-900">
@@ -816,23 +851,6 @@ export default function Page() {
                   <th className="whitespace-nowrap px-4 py-3 text-center font-semibold">
                     상태
                   </th>
-                  {displayDates.map((d) => (
-                    <th
-                      key={d}
-                      className="whitespace-nowrap border-l border-neutral-200 px-4 py-3 text-right font-medium text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"
-                    >
-                      <div className="flex items-center justify-end gap-1">
-                        {d.slice(5)}
-                        <button
-                          onClick={() => removeDate(d)}
-                          aria-label={`${d} 열 삭제`}
-                          className="text-neutral-300 hover:text-red-500"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </th>
-                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -859,8 +877,25 @@ export default function Page() {
                       >
                         {p}
                       </th>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-bold tabular-nums text-red-600 dark:text-red-400">
-                        {m.current.toLocaleString()}
+                      <td className="group relative whitespace-nowrap px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => openDetail(p)}
+                          className="font-bold tabular-nums text-red-600 underline-offset-2 hover:underline dark:text-red-400"
+                          title="클릭하면 과거 재고 달력·표 보기"
+                        >
+                          {m.current.toLocaleString()}
+                        </button>
+                        {/* 마우스 오버 시 이번 달 재고 달력 미리보기 */}
+                        <div className="pointer-events-none absolute right-0 top-full z-30 mt-1 hidden w-[300px] group-hover:block">
+                          <div className="rounded-xl border border-neutral-200 bg-white p-3 text-left shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+                            <MonthCalendar
+                              year={latestYM.y}
+                              month={latestYM.m}
+                              data={dayDataByProduct[p]?.map ?? {}}
+                            />
+                          </div>
+                        </div>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
                         {fmt1(m.avg7)}
@@ -891,17 +926,6 @@ export default function Page() {
                           {s.label}
                         </span>
                       </td>
-                      {displayDates.map((d) => {
-                        const v = sorted.find((x) => x.date === d)?.stock[p];
-                        return (
-                          <td
-                            key={d}
-                            className="whitespace-nowrap border-l border-neutral-200 px-4 py-3 text-right tabular-nums text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
-                          >
-                            {v === undefined ? "-" : v.toLocaleString()}
-                          </td>
-                        );
-                      })}
                     </tr>
                   );
                 })}
@@ -914,14 +938,166 @@ export default function Page() {
       <p className="mt-4 text-xs text-neutral-400">
         * 소진량은 <b>일일 출고량(평균일일배송수량)</b> 기준입니다. 주말(토·일)은 반출이
         없으므로 <b>월요일 출고량을 토·일·월 3일로 나눠(÷3)</b> 반영합니다.{" "}
-        <b>7일 / 30일 평균</b>은 최근 해당 기간의 일평균, <b>최고·최소 소진</b>은 기록된
-        전체 기간 중 하루 최대·최소 소진량입니다. <b>소진까지·예상 소진일</b>은 최근
-        7일 평균(없으면 30일 평균) 기준으로 계산합니다. 출고량 데이터가 없으면 재고
-        감소분으로 추정합니다. <b>상태</b>는 소진까지 60일 이하 <b>부족(빨강)</b>, 99일 이하{" "}
-        <b>보통(노랑)</b>, 100일 이상 <b>여유(초록)</b> 입니다.
+        <b>소진까지·예상 소진일</b>은 <b>최근 30일 평균</b>(없으면 7일 평균) 기준으로
+        계산하며, 데이터가 쌓일수록 정확해집니다. <b>상태</b>는 소진까지 60일 이하{" "}
+        <b>부족(빨강)</b>, 99일 이하 <b>보통(노랑)</b>, 100일 이상 <b>여유(초록)</b>.{" "}
+        <b>현재고 숫자</b>에 마우스를 올리면 이번 달 재고 달력, 클릭하면 과거 전체 달력·표를
+        볼 수 있습니다.
       </p>
       </div>
+
+      {/* 현재고 클릭 시: 과거 재고 달력 + 표 모달 (transform 래퍼 밖에 두어야 fixed 가 뷰포트 기준) */}
+      {detail && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setDetail(null)}
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-5 shadow-xl dark:bg-neutral-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">{detail}</h3>
+              <button
+                onClick={() => setDetail(null)}
+                aria-label="닫기"
+                className="rounded px-2 py-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="mt-4 flex flex-col gap-6 md:flex-row">
+              {/* 달력 (월 이동) */}
+              <div className="md:w-[320px] md:shrink-0">
+                <div className="mb-2 flex items-center justify-between">
+                  <button
+                    onClick={() => stepMonth(-1)}
+                    className="rounded px-2 py-1 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  >
+                    ◀ 이전달
+                  </button>
+                  <button
+                    onClick={() => stepMonth(1)}
+                    className="rounded px-2 py-1 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  >
+                    다음달 ▶
+                  </button>
+                </div>
+                <MonthCalendar
+                  year={calYM.y}
+                  month={calYM.m}
+                  data={dayDataByProduct[detail]?.map ?? {}}
+                />
+                <p className="mt-2 text-[11px] text-neutral-400">
+                  각 날짜: 위=재고, 아래=소진(▼)
+                </p>
+              </div>
+              {/* 전체 기간 표 */}
+              <div className="max-h-[60vh] flex-1 overflow-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead className="sticky top-0 bg-white dark:bg-neutral-900">
+                    <tr className="border-b border-neutral-200 text-left text-xs text-neutral-500 dark:border-neutral-700">
+                      <th className="py-2 pr-3">날짜</th>
+                      <th className="py-2 pr-3 text-right">재고</th>
+                      <th className="py-2 text-right">소진</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(dayDataByProduct[detail]?.datesDesc ?? []).map((d) => {
+                      const info = dayDataByProduct[detail].map[d];
+                      return (
+                        <tr
+                          key={d}
+                          className="border-b border-neutral-100 dark:border-neutral-800"
+                        >
+                          <td className="py-1.5 pr-3 tabular-nums">{d}</td>
+                          <td className="py-1.5 pr-3 text-right font-medium tabular-nums">
+                            {info.stock?.toLocaleString() ?? "-"}
+                          </td>
+                          <td className="py-1.5 text-right tabular-nums text-neutral-500">
+                            {info.out ?? "-"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </MemberShell>
+  );
+}
+
+// 한 달 달력: 각 날짜에 재고(위)·소진량(아래 ▼) 표시. 데이터 있는 날만 강조.
+function MonthCalendar({
+  year,
+  month,
+  data,
+}: {
+  year: number;
+  month: number;
+  data: Record<string, { stock?: number; out?: number }>;
+}) {
+  const startDow = new Date(Date.UTC(year, month, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < startDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  const dows = ["일", "월", "화", "수", "목", "금", "토"];
+  return (
+    <div>
+      <div className="mb-1 text-center text-sm font-semibold">
+        {year}년 {month + 1}월
+      </div>
+      <div className="mb-0.5 grid grid-cols-7 gap-0.5 text-center text-[10px]">
+        {dows.map((d, i) => (
+          <div
+            key={d}
+            className={
+              i === 0
+                ? "text-red-400"
+                : i === 6
+                  ? "text-blue-400"
+                  : "text-neutral-400"
+            }
+          >
+            {d}
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-0.5">
+        {cells.map((d, i) => {
+          if (d === null) return <div key={i} />;
+          const key = `${year}-${pad(month + 1)}-${pad(d)}`;
+          const info = data[key];
+          return (
+            <div
+              key={i}
+              className={`min-h-[38px] rounded p-1 text-center leading-none ${
+                info
+                  ? "bg-neutral-100 dark:bg-neutral-800"
+                  : "bg-neutral-50/40 dark:bg-neutral-900/40"
+              }`}
+            >
+              <div className="text-[10px] text-neutral-400">{d}</div>
+              {info && (
+                <>
+                  <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-red-600 dark:text-red-400">
+                    {info.stock?.toLocaleString() ?? "-"}
+                  </div>
+                  <div className="text-[9px] tabular-nums text-blue-500">
+                    ▼{info.out ?? 0}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
