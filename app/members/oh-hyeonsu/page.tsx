@@ -1,7 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import MemberShell from "@/components/MemberShell";
+
+// 클릭 시 재생되는 샘플 미리보기 영상 (YouTube API 미연동 — 데모용 클립).
+// 실제 영상은 카드/모달의 "유튜브에서 보기" 버튼으로 이동합니다.
+const SAMPLE_VIDEO_URL =
+  "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4";
 
 // ✏️ "oh-hyeonsu" 님의 페이지 — 인기 영상 모음 (MVP)
 // 상단: 국내/해외 토글(전체 적용). 탭: 정형외과(부위·나이대) / 제품 판매 추천.
@@ -229,6 +234,17 @@ export default function Page() {
   const [orthoCat, setOrthoCat] = useState<string>(ORTHO_CATEGORIES[0].key);
   const [age, setAge] = useState<number | "all">("all");
   const [platform, setPlatform] = useState<Platform>("youtube");
+  const [selected, setSelected] = useState<Video | null>(null);
+
+  // 모달이 열려 있을 때 ESC 로 닫기
+  useEffect(() => {
+    if (!selected) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelected(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected]);
 
   // 현재 조건에 맞는 영상 목록 (조회수 내림차순)
   let videos: Video[] = [];
@@ -398,8 +414,9 @@ export default function Page() {
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {videos.map((v, i) => (
             <article
-              key={`${tab}-${region}-${orthoCat}-${i}`}
-              className="group flex flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white transition-shadow hover:shadow-lg dark:border-neutral-800 dark:bg-neutral-950"
+              key={`${tab}-${region}-${orthoCat}-${platform}-${i}`}
+              onClick={() => setSelected(v)}
+              className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white transition-shadow hover:shadow-lg dark:border-neutral-800 dark:bg-neutral-950"
             >
               {/* 썸네일 (그라데이션 대체) */}
               <div
@@ -444,6 +461,57 @@ export default function Page() {
               </div>
             </article>
           ))}
+        </div>
+      )}
+
+      {/* 재생 모달 */}
+      {selected && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setSelected(null)}
+        >
+          <div
+            className="w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-neutral-950"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="relative bg-black">
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+              <video
+                key={selected.title}
+                src={SAMPLE_VIDEO_URL}
+                controls
+                autoPlay
+                className="aspect-video w-full"
+              />
+              <button
+                onClick={() => setSelected(null)}
+                aria-label="닫기"
+                className="absolute right-2 top-2 rounded-full bg-black/60 px-3 py-1 text-sm font-medium text-white hover:bg-black/80"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="p-5">
+              <h3 className="text-base font-semibold">{selected.title}</h3>
+              <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+                {selected.channel} · {formatViews(selected.views)}
+              </p>
+              <p className="mt-2 text-xs text-neutral-400">
+                ※ 샘플 미리보기 영상입니다 (YouTube API 미연동). 실제 영상은 아래
+                버튼으로 확인하세요.
+              </p>
+              <a
+                href={`https://www.youtube.com/results?search_query=${encodeURIComponent(
+                  selected.title
+                )}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 inline-block rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+              >
+                ▶ 유튜브에서 이 영상 보기
+              </a>
+            </div>
+          </div>
         </div>
       )}
     </MemberShell>
