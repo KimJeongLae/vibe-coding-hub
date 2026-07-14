@@ -4,7 +4,7 @@ import { useState } from "react";
 import MemberShell from "@/components/MemberShell";
 
 // ✏️ "oh-hyeonsu" 님의 페이지 — 인기 영상 모음 (MVP)
-// 상단: 국내/해외 토글(전체 적용). 탭: 정형외과(부위·나이대) / 콜라보 추천.
+// 상단: 국내/해외 토글(전체 적용). 탭: 정형외과(부위·나이대) / 제품 판매 추천.
 // ⚠️ YouTube API 미연동 — 아래 샘플 데이터로 화면과 필터/탭 전환만 동작합니다.
 
 type Region = "domestic" | "overseas";
@@ -178,30 +178,32 @@ const ORTHO_CATEGORIES: Category[] = [
   },
 ];
 
-// ─────────────────── 콜라보 추천: 협업 가능한 영상 ───────────────────
-const COLLAB_VIDEOS: Video[] = [
+// ─────────────────── 제품 판매 추천: 판매에 적합한 영상 (연예인 광고 제외) ───────────────────
+// ⚠️ 연예인 출연 광고 영상은 제외하고, 실사용 리뷰·언박싱·라이브커머스 등
+//    제품을 직접 파는 데 효과적인 콘텐츠만 담았습니다.
+const SALES_VIDEOS: Video[] = [
   // 국내
-  { title: "병원·의료진 협업 건강 콘텐츠 사례", channel: "메디컬토크", views: 8200000, duration: "14:22", region: "domestic" },
-  { title: "헬스 트레이너 콜라보 운동 루틴", channel: "핏콜라보", views: 6400000, duration: "16:08", region: "domestic" },
-  { title: "크리에이터 합방 콜라보 하이라이트", channel: "콜라보하우스", views: 5100000, duration: "18:47", region: "domestic" },
-  { title: "전문가 인터뷰 콜라보 시리즈", channel: "인터뷰룸", views: 3700000, duration: "21:15", region: "domestic" },
-  { title: "브랜드 협업 광고 콜라보 잘한 사례", channel: "마케팅클립", views: 2900000, duration: "12:39", region: "domestic" },
-  { title: "유튜버 챌린지 릴레이 콜라보", channel: "챌린지연합", views: 2300000, duration: "10:52", region: "domestic" },
-  { title: "게스트 초대 토크 콜라보", channel: "토크게스트", views: 1800000, duration: "24:03", region: "domestic" },
-  { title: "다른 채널과 Q&A 맞교환 콜라보", channel: "소통방송", views: 1400000, duration: "15:31", region: "domestic" },
-  { title: "지역 병원 소개 콜라보 브이로그", channel: "로컬헬스", views: 980000, duration: "13:18", region: "domestic" },
-  { title: "팬 참여형 콜라보 이벤트 기획", channel: "팬미팅TV", views: 720000, duration: "11:47", region: "domestic" },
+  { title: "신제품 언박싱 & 첫 사용 후기", channel: "언박싱랩", views: 7600000, duration: "12:41", region: "domestic" },
+  { title: "라이브 커머스 판매 대박 사례 분석", channel: "라이브커머스TV", views: 6100000, duration: "16:22", region: "domestic" },
+  { title: "제품 비교 리뷰 TOP 5 (구매 가이드)", channel: "리뷰노트", views: 5300000, duration: "14:08", region: "domestic" },
+  { title: "실사용 한 달, 솔직 장단점 후기", channel: "솔직리뷰", views: 4200000, duration: "11:53", region: "domestic" },
+  { title: "헬스케어 제품 실사용 후기", channel: "헬스템리뷰", views: 3400000, duration: "13:17", region: "domestic" },
+  { title: "공동구매 인기 상품 소개 & 시연", channel: "공구마켓", views: 2700000, duration: "10:39", region: "domestic" },
+  { title: "가성비 아이템 추천 모음 (실구매)", channel: "가성비헌터", views: 2100000, duration: "15:44", region: "domestic" },
+  { title: "제품 사용법 튜토리얼 (개봉→세팅)", channel: "하우투샵", views: 1600000, duration: "09:26", region: "domestic" },
+  { title: "구매 전 꼭 봐야 할 단점 리뷰", channel: "팩트리뷰", views: 1200000, duration: "12:05", region: "domestic" },
+  { title: "홈쇼핑 스타일 제품 시연 & 판매", channel: "시연왕", views: 880000, duration: "17:31", region: "domestic" },
   // 해외
-  { title: "Doctor x YouTuber Health Collab", channel: "MedTalk", views: 11000000, duration: "15:44", region: "overseas" },
-  { title: "Fitness Trainer Collab Workout", channel: "FitCollab", views: 7300000, duration: "17:26", region: "overseas" },
-  { title: "Creator Collab Challenge Compilation", channel: "CollabHouse", views: 5600000, duration: "19:12", region: "overseas" },
-  { title: "Expert Guest Interview Series", channel: "TalkRoom", views: 3400000, duration: "22:38", region: "overseas" },
-  { title: "Brand Partnership Case Study", channel: "MarketingClips", views: 2100000, duration: "13:05", region: "overseas" },
-  { title: "Cross-Channel Q&A Collab", channel: "CommunityCast", views: 1500000, duration: "14:57", region: "overseas" },
+  { title: "Product Unboxing & First Impressions", channel: "UnboxLab", views: 10000000, duration: "13:44", region: "overseas" },
+  { title: "Live Shopping Sales Highlights", channel: "LiveCommerceTV", views: 6800000, duration: "18:12", region: "overseas" },
+  { title: "Honest Product Review (30 Days)", channel: "HonestReview", views: 5100000, duration: "14:57", region: "overseas" },
+  { title: "Top 5 Product Comparison (Buying Guide)", channel: "ReviewNote", views: 3300000, duration: "16:05", region: "overseas" },
+  { title: "How-To Product Tutorial (Setup)", channel: "HowToShop", views: 2000000, duration: "09:38", region: "overseas" },
+  { title: "Best Value Gadgets Roundup", channel: "ValueHunter", views: 1400000, duration: "15:22", region: "overseas" },
 ];
 
 // ────────────────────────────── 컴포넌트 ──────────────────────────────
-type TabKey = "orthopedic" | "collab";
+type TabKey = "orthopedic" | "sales";
 
 export default function Page() {
   const [region, setRegion] = useState<Region>("domestic");
@@ -218,7 +220,7 @@ export default function Page() {
         v.region === region && (age === "all" || v.ages?.includes(age))
     );
   } else {
-    videos = COLLAB_VIDEOS.filter((v) => v.region === region);
+    videos = SALES_VIDEOS.filter((v) => v.region === region);
   }
   videos = [...videos].sort((a, b) => b.views - a.views);
 
@@ -239,7 +241,7 @@ export default function Page() {
         <h2 className="mt-1 text-2xl font-bold">🎬 인기 영상 모음</h2>
         <p className="mt-2 max-w-2xl text-sm text-blue-50">
           <b>국내/해외</b>를 골라 <b>정형외과</b>(부위·나이대별)와{" "}
-          <b>콜라보 추천</b> 영상을 살펴보세요. 모든 목록은 조회수순으로
+          <b>제품 판매 추천</b> 영상을 살펴보세요. 모든 목록은 조회수순으로
           정렬됩니다. (샘플 데이터 · YouTube API 미연동)
         </p>
       </section>
@@ -271,7 +273,7 @@ export default function Page() {
         {(
           [
             { key: "orthopedic", label: "🩺 정형외과" },
-            { key: "collab", label: "🤝 콜라보 추천" },
+            { key: "sales", label: "🛒 제품 판매 추천" },
           ] as const
         ).map((t) => (
           <button
@@ -328,10 +330,11 @@ export default function Page() {
         </div>
       )}
 
-      {/* 콜라보 탭 안내 */}
-      {tab === "collab" && (
+      {/* 제품 판매 탭 안내 */}
+      {tab === "sales" && (
         <p className="mb-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-          🤝 다른 채널·전문가와 <b>콜라보(협업)</b> 하기 좋은 영상만 모았습니다.
+          🛒 <b>제품 판매</b>에 효과적인 영상(리뷰·언박싱·라이브커머스 등)만
+          모았습니다. <b>연예인 광고 영상은 제외</b>했습니다.
         </p>
       )}
 
