@@ -655,6 +655,8 @@ export default function Page() {
 
   return (
     <MemberShell slug={SLUG}>
+      {/* 공통 레이아웃(max-w-4xl)보다 넓게 — 뷰포트 중앙 기준 약 1.3배 폭 */}
+      <div className="relative left-1/2 w-[72rem] max-w-[92vw] -translate-x-1/2">
       {/* 요약 카드 */}
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <SummaryCard label="관리 제품" value={`${products.length}`} unit="개" />
@@ -755,11 +757,15 @@ export default function Page() {
                   <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">
                     현재고
                   </th>
-                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">
-                    7일 평균 소진
+                  <th className="px-4 py-3 text-right font-semibold leading-tight">
+                    7일 평균
+                    <br />
+                    소진
                   </th>
-                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">
-                    30일 평균 소진
+                  <th className="px-4 py-3 text-right font-semibold leading-tight">
+                    30일 평균
+                    <br />
+                    소진
                   </th>
                   <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">
                     최고 소진
@@ -879,6 +885,7 @@ export default function Page() {
         7일 평균(없으면 30일 평균) 기준으로 계산합니다. 출고량 데이터가 없으면 재고
         감소분으로 추정합니다.
       </p>
+      </div>
     </MemberShell>
   );
 }
