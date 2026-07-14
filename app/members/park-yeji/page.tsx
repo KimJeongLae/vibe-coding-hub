@@ -6,8 +6,8 @@ import MemberShell from "@/components/MemberShell";
 // ✏️ "park-yeji" 님의 페이지 — 디자인 컨펌 사이트 (MVP)
 // ───────────────────────────────────────────────────────────────
 // 역할이 나뉩니다.
-//   🎨 디자이너 모드 : 이미지 업로드 / 삭제 (업로드 버튼은 우측 상단에 조용히)
-//   ✅ 컨펌 모드     : 이미지 확대 보기 / 코멘트 / 컨펌완료 표시
+//   🎨 디자이너 모드 : 이미지 업로드(여러 장)/삭제/수정(교체) — 비밀번호 필요
+//   ✅ 컨펌 모드     : 그룹 이미지를 세로로 넘겨보며 코멘트/컨펌완료 표시
 // 이미지는 아래 카테고리(그룹)별로 분류해서 봅니다.
 // * MVP 라서 데이터는 이 브라우저(localStorage)에 저장됩니다.
 // ───────────────────────────────────────────────────────────────
@@ -45,6 +45,28 @@ function makeId() {
   return `${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
 }
 
+// 컨펌완료 이미지는 뒤로 (안정 정렬)
+function sortForDisplay(items: Design[]) {
+  return [...items].sort((a, b) => Number(a.confirmed) - Number(b.confirmed));
+}
+
+// 이미지 위에 찍히는 "컨펌완료" 도장
+function ConfirmStamp({ small = false }: { small?: boolean }) {
+  return (
+    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+      <span
+        className={`-rotate-12 rounded-lg border-green-500 bg-white/40 font-extrabold text-green-600 shadow-sm backdrop-blur-[1px] dark:bg-black/30 ${
+          small
+            ? "border-2 px-2 py-0.5 text-xs"
+            : "border-4 px-5 py-1.5 text-2xl tracking-wide"
+        }`}
+      >
+        ✓ 컨펌완료
+      </span>
+    </div>
+  );
+}
+
 export default function Page() {
   const [designs, setDesigns] = useState<Design[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -52,9 +74,11 @@ export default function Page() {
   const [activeCat, setActiveCat] = useState<string>("전체");
   const [uploadCat, setUploadCat] = useState<string>(CATEGORIES[0]);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [openComments, setOpenComments] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
 
   // 편집 가능한 제목
   const [title, setTitle] = useState<string>(DEFAULT_TITLE);
@@ -72,11 +96,12 @@ export default function Page() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Design[];
-        // 카테고리가 없거나 목록에 없는 값은 기본 그룹으로 보정
         setDesigns(
           parsed.map((d) => ({
             ...d,
-            category: CATEGORIES.includes(d.category as (typeof CATEGORIES)[number])
+            category: CATEGORIES.includes(
+              d.category as (typeof CATEGORIES)[number],
+            )
               ? d.category
               : FALLBACK_CATEGORY,
           })),
@@ -84,7 +109,7 @@ export default function Page() {
       }
       const savedTitle = localStorage.getItem(`${STORAGE_KEY}-title`);
       if (savedTitle) setTitle(savedTitle);
-      // 역할(role)은 저장하지 않습니다 → 새로고침하면 항상 컨펌 모드로 시작(비밀번호 재확인)
+      // 역할(role)은 저장하지 않음 → 새로고침하면 항상 컨펌 모드로 시작(비밀번호 재확인)
     } catch {
       // 손상된 데이터 무시
     }
@@ -107,6 +132,18 @@ export default function Page() {
 
   const opened = designs.find((d) => d.id === openId) ?? null;
   const isDesigner = role === "designer";
+
+  // 컨펌 모드 뷰어: 같은 그룹을, 클릭한 이미지 먼저 + 나머지(컨펌완료는 뒤)
+  const viewerList = opened
+    ? [
+        opened,
+        ...sortForDisplay(
+          designs.filter(
+            (d) => d.category === opened.category && d.id !== opened.id,
+          ),
+        ),
+      ]
+    : [];
 
   function openDesignerGate() {
     setPwd("");
@@ -165,6 +202,34 @@ export default function Page() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
+  // [수정] 기존 이미지를 새 이미지로 교체 (기존 이미지는 삭제됨)
+  function handleReplaceFile(files: FileList | null) {
+    const file = files?.[0];
+    if (!file || !openId) return;
+    if (!file.type.startsWith("image/")) {
+      setError("이미지 파일만 올릴 수 있어요.");
+      return;
+    }
+    const targetId = openId;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setDesigns((prev) =>
+        prev.map((d) =>
+          d.id === targetId
+            ? {
+                ...d,
+                src: reader.result as string,
+                name: file.name,
+                confirmed: false, // 새 이미지이므로 컨펌 초기화
+              }
+            : d,
+        ),
+      );
+    };
+    reader.readAsDataURL(file);
+    if (replaceInputRef.current) replaceInputRef.current.value = "";
+  }
+
   function removeDesign(id: string) {
     setDesigns((prev) => prev.filter((d) => d.id !== id));
     if (openId === id) setOpenId(null);
@@ -177,7 +242,7 @@ export default function Page() {
   }
 
   function addComment(id: string) {
-    const text = draft.trim();
+    const text = (drafts[id] ?? "").trim();
     if (!text) return;
     setDesigns((prev) =>
       prev.map((d) =>
@@ -192,7 +257,7 @@ export default function Page() {
           : d,
       ),
     );
-    setDraft("");
+    setDrafts((prev) => ({ ...prev, [id]: "" }));
   }
 
   function removeComment(designId: string, commentId: string) {
@@ -205,7 +270,6 @@ export default function Page() {
     );
   }
 
-  // 화면에 보여줄 카테고리 목록 (전체면 내용이 있는 그룹만 섹션으로)
   const visibleCats =
     activeCat === "전체"
       ? CATEGORIES.filter((c) => countOf(c) > 0)
@@ -213,7 +277,7 @@ export default function Page() {
 
   return (
     <MemberShell slug="park-yeji">
-      {/* 상단 바: 좌측 제목/역할, 우측 끝에 조용한 업로드 버튼 */}
+      {/* 상단 바 */}
       <section className="rounded-2xl border border-neutral-200 bg-gradient-to-br from-rose-50 to-white p-6 dark:border-neutral-800 dark:from-neutral-900 dark:to-neutral-950">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
@@ -324,15 +388,13 @@ export default function Page() {
                   확인
                 </button>
                 {pwdError && (
-                  <span className="text-xs text-red-500">
-                    비밀번호가 틀려요.
-                  </span>
+                  <span className="text-xs text-red-500">비밀번호가 틀려요.</span>
                 )}
               </div>
             )}
           </div>
 
-          {/* 우측 상단 끝: 디자이너 모드에서만 보이는 조용한 업로드 */}
+          {/* 우측 상단 끝: 디자이너 모드에서만 보이는 조용한 업로드 (여러 장 가능) */}
           {isDesigner && (
             <div className="flex items-center gap-1.5 self-start text-xs text-neutral-500 dark:text-neutral-400">
               <select
@@ -351,6 +413,7 @@ export default function Page() {
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className="rounded-md border border-neutral-300 px-2.5 py-1 transition-colors hover:border-neutral-400 hover:text-neutral-700 dark:border-neutral-700 dark:hover:text-neutral-200"
+                title="여러 장 한 번에 선택할 수 있어요"
               >
                 + 업로드
               </button>
@@ -390,7 +453,9 @@ export default function Page() {
               }`}
             >
               {c}
-              <span className={active ? "ml-1.5 opacity-80" : "ml-1.5 text-neutral-400"}>
+              <span
+                className={active ? "ml-1.5 opacity-80" : "ml-1.5 text-neutral-400"}
+              >
                 {n}
               </span>
             </button>
@@ -405,7 +470,9 @@ export default function Page() {
           <p className="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
             아직 올린 디자인이 없어요.{" "}
             {isDesigner ? (
-              <>우측 상단의 <b>+ 업로드</b>로 시안을 올려보세요.</>
+              <>
+                우측 상단의 <b>+ 업로드</b>로 시안을 올려보세요.
+              </>
             ) : (
               <>디자이너 모드로 전환하면 이미지를 올릴 수 있어요.</>
             )}
@@ -414,7 +481,7 @@ export default function Page() {
       ) : (
         <div className="mt-6 space-y-8">
           {visibleCats.map((cat) => {
-            const items = designs.filter((d) => d.category === cat);
+            const items = sortForDisplay(designs.filter((d) => d.category === cat));
             if (items.length === 0) {
               return (
                 <section key={cat}>
@@ -445,7 +512,7 @@ export default function Page() {
                       <button
                         type="button"
                         onClick={() => setOpenId(d.id)}
-                        className="block w-full"
+                        className="relative block w-full"
                         title="크게 보기"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -454,13 +521,8 @@ export default function Page() {
                           alt={d.name}
                           className="aspect-square w-full object-cover transition-transform duration-200 group-hover:scale-105"
                         />
+                        {d.confirmed && <ConfirmStamp small />}
                       </button>
-
-                      {d.confirmed && (
-                        <span className="pointer-events-none absolute left-2 top-2 rounded-full bg-green-500 px-2 py-0.5 text-xs font-semibold text-white shadow">
-                          ✓ 컨펌완료
-                        </span>
-                      )}
 
                       {isDesigner && (
                         <button
@@ -492,127 +554,223 @@ export default function Page() {
         </div>
       )}
 
-      {/* 확대 + 코멘트 라이트박스 */}
-      {opened && (
+      {/* ───────── 디자이너 모드: 단일 이미지 (수정/삭제) ───────── */}
+      {opened && isDesigner && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
           onClick={() => setOpenId(null)}
         >
           <div
-            className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-neutral-900 md:flex-row"
+            className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-neutral-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex flex-1 items-center justify-center bg-neutral-100 p-4 dark:bg-neutral-950">
+            <div className="flex items-center justify-between gap-2 border-b border-neutral-200 p-4 dark:border-neutral-800">
+              <div className="min-w-0">
+                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                  {opened.category}
+                </span>
+                <h3 className="mt-1 truncate font-semibold">{opened.name}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenId(null)}
+                className="shrink-0 rounded-full px-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800"
+                title="닫기"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="relative flex flex-1 items-center justify-center overflow-auto bg-neutral-100 p-4 dark:bg-neutral-950">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={opened.src}
                 alt={opened.name}
-                className="max-h-[80vh] w-auto max-w-full rounded-lg object-contain"
+                className="max-h-[65vh] w-auto max-w-full rounded-lg object-contain"
               />
+              {opened.confirmed && <ConfirmStamp />}
             </div>
 
-            <div className="flex w-full flex-col border-t border-neutral-200 dark:border-neutral-800 md:w-80 md:border-l md:border-t-0">
-              <div className="flex items-start justify-between gap-2 border-b border-neutral-200 p-4 dark:border-neutral-800">
-                <div className="min-w-0">
-                  <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
-                    {opened.category}
-                  </span>
-                  <h3 className="mt-1 truncate font-semibold">{opened.name}</h3>
-                  {opened.confirmed && (
-                    <span className="text-xs font-medium text-green-600">
-                      ✓ 컨펌완료
-                    </span>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setOpenId(null)}
-                  className="shrink-0 rounded-full px-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800"
-                  title="닫기"
-                >
-                  ✕
-                </button>
-              </div>
+            {/* 수정 / 삭제 */}
+            <div className="flex gap-2 border-t border-neutral-200 p-3 dark:border-neutral-800">
+              <button
+                type="button"
+                onClick={() => replaceInputRef.current?.click()}
+                className="flex-1 rounded-lg border border-neutral-300 px-3 py-2 text-sm font-medium hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+              >
+                수정 (이미지 교체)
+              </button>
+              <button
+                type="button"
+                onClick={() => removeDesign(opened.id)}
+                className="flex-1 rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-500 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-950"
+              >
+                이 이미지 삭제
+              </button>
+              <input
+                ref={replaceInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(e) => handleReplaceFile(e.target.files)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
-              <div className="flex-1 space-y-2 overflow-y-auto p-4">
-                {opened.comments.length === 0 ? (
-                  <p className="text-sm text-neutral-400">
-                    아직 코멘트가 없어요.
-                    {!isDesigner && " 아래에 첫 코멘트를 남겨보세요."}
-                  </p>
-                ) : (
-                  opened.comments.map((c) => (
-                    <div
-                      key={c.id}
-                      className="group/c rounded-lg bg-neutral-100 px-3 py-2 dark:bg-neutral-800"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="whitespace-pre-wrap break-words text-sm">
-                          {c.text}
-                        </p>
-                        {!isDesigner && (
+      {/* ───────── 컨펌 모드: 그룹 세로 뷰어 (클릭 이미지 먼저) ───────── */}
+      {opened && !isDesigner && (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4"
+          onClick={() => setOpenId(null)}
+        >
+          <div
+            className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-neutral-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-neutral-200 p-4 dark:border-neutral-800">
+              <div className="min-w-0">
+                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                  {opened.category}
+                </span>
+                <h3 className="mt-1 text-sm font-semibold text-neutral-500">
+                  아래로 넘겨서 이 그룹의 시안을 이어서 볼 수 있어요
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenId(null)}
+                className="shrink-0 rounded-full px-2 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800"
+                title="닫기"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* 세로 스크롤 영역 */}
+            <div className="flex-1 space-y-6 overflow-y-auto p-4">
+              {viewerList.map((d, idx) => {
+                const commentsShown = openComments[d.id] ?? false;
+                return (
+                  <div
+                    key={d.id}
+                    className="overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800"
+                  >
+                    {/* 이미지 */}
+                    <div className="relative flex items-center justify-center bg-neutral-100 p-3 dark:bg-neutral-950">
+                      {idx === 0 && (
+                        <span className="absolute left-2 top-2 z-10 rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-semibold text-white">
+                          방금 클릭한 시안
+                        </span>
+                      )}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={d.src}
+                        alt={d.name}
+                        className="max-h-[70vh] w-auto max-w-full rounded-lg object-contain"
+                      />
+                      {d.confirmed && <ConfirmStamp />}
+                    </div>
+
+                    {/* 컨트롤 */}
+                    <div className="p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium">
+                          {d.name}
+                        </span>
+                        <div className="flex items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => removeComment(opened.id, c.id)}
-                            className="shrink-0 text-xs text-neutral-400 opacity-0 hover:text-red-500 group-hover/c:opacity-100"
-                            title="코멘트 삭제"
+                            onClick={() => toggleConfirm(d.id)}
+                            className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors ${
+                              d.confirmed
+                                ? "bg-green-500 text-white hover:bg-green-600"
+                                : "border border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+                            }`}
                           >
-                            ✕
+                            {d.confirmed ? "✓ 컨펌완료" : "컨펌완료로 표시"}
                           </button>
-                        )}
+                          {/* 모바일에서만: 코멘트 열기 버튼 */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOpenComments((prev) => ({
+                                ...prev,
+                                [d.id]: !commentsShown,
+                              }))
+                            }
+                            className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-600 md:hidden dark:border-neutral-700 dark:text-neutral-300"
+                          >
+                            💬 코멘트 {d.comments.length} {commentsShown ? "▲" : "▼"}
+                          </button>
+                        </div>
                       </div>
-                      <time className="mt-1 block text-[11px] text-neutral-400">
-                        {c.at}
-                      </time>
-                    </div>
-                  ))
-                )}
-              </div>
 
-              {/* 컨펌 모드에서만 코멘트/컨펌, 디자이너 모드에서는 삭제 */}
-              <div className="border-t border-neutral-200 p-3 dark:border-neutral-800">
-                {isDesigner ? (
-                  <button
-                    type="button"
-                    onClick={() => removeDesign(opened.id)}
-                    className="w-full rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-500 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-950"
-                  >
-                    이 이미지 삭제
-                  </button>
-                ) : (
-                  <>
-                    <div className="flex gap-2">
-                      <input
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") addComment(opened.id);
-                        }}
-                        placeholder="코멘트를 입력하고 Enter"
-                        className="flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-rose-400 dark:border-neutral-700 dark:bg-neutral-800"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => addComment(opened.id)}
-                        className="rounded-lg bg-neutral-800 px-3 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-white"
+                      {/* 코멘트 영역: 모바일은 버튼 클릭 시에만, PC(md+)는 항상 표시 */}
+                      <div
+                        className={`${commentsShown ? "block" : "hidden"} mt-3 md:block`}
                       >
-                        등록
-                      </button>
+                        <div className="space-y-2">
+                          {d.comments.length === 0 ? (
+                            <p className="text-sm text-neutral-400">
+                              아직 코멘트가 없어요. 아래에 남겨보세요.
+                            </p>
+                          ) : (
+                            d.comments.map((c) => (
+                              <div
+                                key={c.id}
+                                className="group/c rounded-lg bg-neutral-100 px-3 py-2 dark:bg-neutral-800"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="whitespace-pre-wrap break-words text-sm">
+                                    {c.text}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeComment(d.id, c.id)}
+                                    className="shrink-0 text-xs text-neutral-400 hover:text-red-500 md:opacity-0 md:group-hover/c:opacity-100"
+                                    title="코멘트 삭제"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                                <time className="mt-1 block text-[11px] text-neutral-400">
+                                  {c.at}
+                                </time>
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                        <div className="mt-2 flex gap-2">
+                          <input
+                            value={drafts[d.id] ?? ""}
+                            onChange={(e) =>
+                              setDrafts((prev) => ({
+                                ...prev,
+                                [d.id]: e.target.value,
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") addComment(d.id);
+                            }}
+                            placeholder="코멘트를 입력하고 Enter"
+                            className="flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-rose-400 dark:border-neutral-700 dark:bg-neutral-800"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => addComment(d.id)}
+                            className="rounded-lg bg-neutral-800 px-3 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-neutral-200 dark:text-neutral-900 dark:hover:bg-white"
+                          >
+                            등록
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => toggleConfirm(opened.id)}
-                      className={`mt-3 w-full rounded-lg px-3 py-2 text-sm font-semibold transition-colors ${
-                        opened.confirmed
-                          ? "bg-green-500 text-white hover:bg-green-600"
-                          : "border border-green-500 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
-                      }`}
-                    >
-                      {opened.confirmed ? "✓ 컨펌완료 (해제하려면 클릭)" : "컨펌완료로 표시"}
-                    </button>
-                  </>
-                )}
-              </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
