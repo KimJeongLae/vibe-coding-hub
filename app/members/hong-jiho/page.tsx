@@ -448,39 +448,54 @@ export default function Page() {
   const latestDate = dates.length ? dates[dates.length - 1] : "-";
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     setError("");
     setNotice("");
-    if (!file) return;
+    if (files.length === 0) return;
     setBusy(true);
     try {
-      const isCsv = /\.csv$/i.test(file.name);
-      const grid = isCsv
-        ? parseCSV(await readTextSmart(file))
-        : await parseXlsx(file);
-      const result = buildSnapshots(grid, date, file.name);
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      const collected: Snapshot[] = [];
+      const failed: string[] = [];
+      let fromFileCount = 0;
+      // 여러 파일을 순서대로 파싱해서 모읍니다 (파일별 날짜로 각각 쌓임)
+      for (const file of files) {
+        try {
+          const isCsv = /\.csv$/i.test(file.name);
+          const grid = isCsv
+            ? parseCSV(await readTextSmart(file))
+            : await parseXlsx(file);
+          const result = buildSnapshots(grid, date, file.name);
+          if (!result.ok) {
+            failed.push(`${file.name} (${result.error})`);
+            continue;
+          }
+          collected.push(...result.snapshots);
+          if (result.dateFromFile) fromFileCount++;
+        } catch (err) {
+          failed.push(
+            `${file.name} (${err instanceof Error ? err.message : "읽기 오류"})`,
+          );
+        }
       }
-      setSnapshots((prev) => {
-        const map = new Map(prev.map((s) => [s.date, s.qty]));
-        for (const s of result.snapshots) map.set(s.date, s.qty); // 같은 날짜 덮어쓰기
-        return Array.from(map, ([d, qty]) => ({ date: d, qty }));
-      });
-      const dayList = result.snapshots.map((s) => s.date).sort();
-      if (dayList.length === 1) setDate(dayList[0]);
-      setNotice(
-        `${dayList[0]}${dayList.length > 1 ? ` 외 ${dayList.length - 1}일` : ""} · 제품 ${
-          result.products
-        }개를 불러왔습니다. ${
-          result.dateFromFile ? "(파일에서 날짜 인식)" : "(선택한 기준 날짜 사용)"
-        }`,
-      );
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "파일을 읽는 중 오류가 발생했습니다.",
-      );
+
+      if (collected.length > 0) {
+        setSnapshots((prev) => {
+          const map = new Map(prev.map((s) => [s.date, s.qty]));
+          for (const s of collected) map.set(s.date, s.qty); // 같은 날짜는 덮어쓰기
+          return Array.from(map, ([d, qty]) => ({ date: d, qty }));
+        });
+        const days = Array.from(new Set(collected.map((s) => s.date))).sort();
+        const productCount = new Set(collected.flatMap((s) => Object.keys(s.qty)))
+          .size;
+        if (days.length === 1) setDate(days[0]);
+        setNotice(
+          `파일 ${files.length - failed.length}개 · 날짜 ${days.length}일 · 제품 ${productCount}개를 불러왔습니다.` +
+            (fromFileCount > 0 ? " (파일에서 날짜 인식)" : " (선택한 기준 날짜 사용)"),
+        );
+      }
+      if (failed.length > 0) {
+        setError(`${failed.length}개 파일을 읽지 못했습니다: ${failed.join(", ")}`);
+      }
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -517,12 +532,15 @@ export default function Page() {
           <label className="grid gap-1.5">
             <span className="text-sm font-medium">
               재고 파일 업로드{" "}
-              <span className="font-normal text-neutral-400">(.xlsx / .csv)</span>
+              <span className="font-normal text-neutral-400">
+                (.xlsx / .csv · 여러 개 동시 선택 가능)
+              </span>
             </span>
             <input
               ref={fileRef}
               type="file"
               accept=".xlsx,.xls,.csv"
+              multiple
               disabled={busy}
               onChange={handleFile}
               className="text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-blue-700 disabled:opacity-50"
@@ -566,9 +584,10 @@ export default function Page() {
           </p>
         )}
         <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
-          피디온에서 받은 재고 파일을 그대로 올리세요. <b>제품명·재고량</b> 열을
-          자동으로 찾고, 파일에 적힌 <b>날짜</b>로 그날의 열을 쌓습니다. 같은 날짜를
-          다시 올리면 덮어씁니다.
+          피디온에서 받은 재고 파일을 올리세요. 여러 날짜의 파일을{" "}
+          <b>한 번에 선택</b>하면 한꺼번에 쌓입니다. <b>제품명·재고량</b> 열을 자동으로
+          찾고, 파일에 적힌 <b>날짜</b>로 그날의 열을 만듭니다. 같은 날짜를 다시 올리면
+          덮어씁니다.
         </p>
       </section>
 
