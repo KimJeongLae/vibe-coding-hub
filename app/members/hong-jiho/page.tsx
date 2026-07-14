@@ -23,9 +23,9 @@ const STORAGE_KEY = `inventory:${SLUG}`;
 type Snapshot = { date: string; qty: Record<string, number> };
 
 // ── 헤더 키워드 ─────────────────────────────────────────────
+// 헤더 행을 찾을 때 쓰는 키워드 (열 선택은 아래 score* 함수가 담당)
 const NAME_KEYS = ["제품", "상품", "품명", "품목", "name", "product"];
 const QTY_KEYS = ["재고", "수량", "현재고", "잔량", "stock", "qty"];
-const DATE_KEYS = ["날짜", "일자", "기준일", "date"];
 
 // ── CSV 파싱 (따옴표/줄바꿈 처리) ─────────────────────────────
 function parseCSV(text: string): string[][] {
@@ -215,6 +215,43 @@ function includesAny(cell: string, keys: string[]) {
   return keys.some((k) => c.includes(k.toLowerCase()));
 }
 
+// 여러 후보 열 중 "가장 적합한" 열을 점수로 선택.
+// (예: 배송수량·평균일일배송수량·현재재고 가 함께 있을 때 현재재고 를 골라야 함)
+function bestColumn(header: string[], score: (h: string) => number) {
+  let best = -1;
+  let bestScore = 0;
+  header.forEach((h, i) => {
+    const s = score(h ?? "");
+    if (s > bestScore) {
+      bestScore = s;
+      best = i;
+    }
+  });
+  return best;
+}
+function scoreName(h: string) {
+  const c = h.trim().toLowerCase();
+  if (c.includes("상품명") || c.includes("제품명") || c.includes("품명")) return 5;
+  if (c.includes("품목")) return 4;
+  if (c.includes("상품") || c.includes("제품") || c.includes("product")) return 3;
+  if (c === "name") return 3;
+  return 0;
+}
+function scoreQty(h: string) {
+  const c = h.trim().toLowerCase();
+  if (c.includes("현재재고") || c.includes("현재고")) return 6; // 최우선
+  if (c.includes("가용재고") || c.includes("재고량")) return 5;
+  if (c.includes("재고") || c.includes("잔량") || c === "stock") return 4;
+  if (c.includes("수량") || c === "qty") return 1; // 배송수량 등은 최하위
+  return 0;
+}
+function scoreDate(h: string) {
+  const c = h.trim().toLowerCase();
+  if (c.includes("날짜") || c.includes("일자") || c.includes("기준일")) return 3;
+  if (c.includes("date")) return 3;
+  return 0;
+}
+
 function buildSnapshots(
   grid: string[][],
   fallbackDate: string,
@@ -235,9 +272,9 @@ function buildSnapshots(
   const dataRows = headerRow >= 0 ? rows.slice(headerRow + 1) : rows;
   const aboveRows = headerRow >= 0 ? rows.slice(0, headerRow) : [];
 
-  let nameIdx = header.findIndex((c) => includesAny(c, NAME_KEYS));
-  let qtyIdx = header.findIndex((c) => includesAny(c, QTY_KEYS));
-  const dateIdx = header.findIndex((c) => includesAny(c, DATE_KEYS));
+  let nameIdx = bestColumn(header, scoreName);
+  let qtyIdx = bestColumn(header, scoreQty);
+  const dateIdx = bestColumn(header, scoreDate);
   if (nameIdx === -1) nameIdx = 0;
   if (qtyIdx === -1) qtyIdx = header.length > 1 ? 1 : 0;
 
