@@ -162,19 +162,21 @@ const YT_IDS: Record<string, string> = {
   "Top 5 Product Comparison (Buying Guide)": "daF9JE6yQ8w",
   "How-To Product Tutorial (Setup)": "33bm9ssnuuM",
   "Best Value Gadgets Roundup": "OpOmfAr9HU8",
-  "릴스로 제품 30초 소개 (전환율 UP)": "Uk7FiUhYp60",
-  "인스타 공동구매 후기 릴스 모음": "E9dlbRsss2k",
-  "제품 언박싱 릴스 (짧고 강하게)": "rPLv2Dvz8sM",
-  "사용 전후 비교 릴스": "wfGWCvKZIvg",
-  "인스타 라이브 쇼핑 하이라이트": "wFtFWiyrZf8",
-  "1분 제품 사용법 릴스": "IepaYr8SEes",
-  "인플루언서 실사용 릴스 (비연예인)": "as3zHoC7AA4",
-  "제품 스타일링 릴스": "3T7-dlzz8rk",
-  "30-Second Product Reel (High Convert)": "LlkpANcY-Qk",
-  "Instagram Live Shopping Highlights": "_VxIcnlVrgE",
-  "Before & After Product Reel": "DidPjY6RWr4",
-  "Unboxing Reels Compilation": "eF0bnHuSAqI",
-  "Influencer Honest Reel (non-celebrity)": "ZlEd32p4lc0",
+  "경추베개 | 아침 목 통증 '비포·애프터' 상황극 릴스": "whPLXvuSJ9Q",
+  "경추베개 | 자는 동안 목 정렬 3D 모션그래픽 광고": "1oC1rTSOe78",
+  "허리베개 | 무너지는 허리 vs 받쳐주는 허리 대비 릴스": "9mU8vmyhpkE",
+  "허리베개 | 재택근무 허리 세우기 15초 데모 광고": "KaJbSSMmDHo",
+  "자동차 허리쿠션 | 장거리 운전 허리 뻐근함 해결 상황극": "gMEF2KzgU5A",
+  "자동차 허리쿠션 | 운전 자세 교정 인포그래픽 릴스": "G9bD76jMnmY",
+  "차량용 목쿠션 | 신호대기 중 꾸벅, 목 받쳐주는 순간 광고": "JCtQ7M5XT-Q",
+  "차량용 목쿠션 | 조수석 낮잠 편안함 감성 ASMR 릴스": "JCtQ7M5XT-Q",
+  "허리보호대 | 무거운 짐 들기 전·후 코어 잡아주는 데모 광고": "aF60pe42SrE",
+  "허리보호대 | 물류·택배 근무자 하루 착용 시네마틱 광고": "OgGNv1zKEOU",
+  "Cervical Pillow | 'Wake up pain-free' before/after reel": "cSSu8QsJqYE",
+  "Lumbar Pillow | Desk posture fix in 15s (demo ad)": "6Nl7oCssJ5g",
+  "Car Lumbar Cushion | Long-drive back relief story reel": "5H1o6ebCaWc",
+  "Car Neck Cushion | Passenger nap comfort ASMR reel": "0ZbH1kPjQSk",
+  "Back Support Belt | Lift-safe core support (demo ad)": "XKWrW1Ro3N4",
 };
 
 function ytId(v: { title: string }): string {
@@ -336,21 +338,23 @@ const SALES_VIDEOS: Video[] = [
   { title: "How-To Product Tutorial (Setup)", channel: "HowToShop", views: 2000000, duration: "09:38", region: "overseas", platform: "youtube" },
   { title: "Best Value Gadgets Roundup", channel: "ValueHunter", views: 1400000, duration: "15:22", region: "overseas", platform: "youtube" },
 
-  // ── 인스타그램 · 국내 ──
-  { title: "릴스로 제품 30초 소개 (전환율 UP)", channel: "릴스마케팅", views: 5400000, duration: "0:30", region: "domestic", platform: "instagram" },
-  { title: "인스타 공동구매 후기 릴스 모음", channel: "공구스타그램", views: 3900000, duration: "0:45", region: "domestic", platform: "instagram" },
-  { title: "제품 언박싱 릴스 (짧고 강하게)", channel: "언박싱릴스", views: 3100000, duration: "0:38", region: "domestic", platform: "instagram" },
-  { title: "사용 전후 비교 릴스", channel: "비포애프터", views: 2600000, duration: "0:52", region: "domestic", platform: "instagram" },
-  { title: "인스타 라이브 쇼핑 하이라이트", channel: "라이브샵그램", views: 1900000, duration: "1:12", region: "domestic", platform: "instagram" },
-  { title: "1분 제품 사용법 릴스", channel: "꿀팁릴스", views: 1400000, duration: "0:58", region: "domestic", platform: "instagram" },
-  { title: "인플루언서 실사용 릴스 (비연예인)", channel: "리뷰그램", views: 980000, duration: "0:41", region: "domestic", platform: "instagram" },
-  { title: "제품 스타일링 릴스", channel: "스타일샵", views: 720000, duration: "0:35", region: "domestic", platform: "instagram" },
-  // ── 인스타그램 · 해외 ──
-  { title: "30-Second Product Reel (High Convert)", channel: "ReelsMarketing", views: 8200000, duration: "0:30", region: "overseas", platform: "instagram" },
-  { title: "Instagram Live Shopping Highlights", channel: "LiveShopGram", views: 4700000, duration: "1:20", region: "overseas", platform: "instagram" },
-  { title: "Before & After Product Reel", channel: "BeforeAfter", views: 3600000, duration: "0:48", region: "overseas", platform: "instagram" },
-  { title: "Unboxing Reels Compilation", channel: "UnboxReels", views: 2400000, duration: "0:55", region: "overseas", platform: "instagram" },
-  { title: "Influencer Honest Reel (non-celebrity)", channel: "ReviewGram", views: 1500000, duration: "0:42", region: "overseas", platform: "instagram" },
+  // ── 인스타그램 · 국내 (닥터써클 스토어 제품 기반 광고 아이디어 · 연예인/후기/언박싱 제외) ──
+  { title: "경추베개 | 아침 목 통증 '비포·애프터' 상황극 릴스", channel: "닥터써클 · 경추베개", views: 4200000, duration: "0:28", region: "domestic", platform: "instagram" },
+  { title: "경추베개 | 자는 동안 목 정렬 3D 모션그래픽 광고", channel: "닥터써클 · 경추베개", views: 3600000, duration: "0:22", region: "domestic", platform: "instagram" },
+  { title: "허리베개 | 무너지는 허리 vs 받쳐주는 허리 대비 릴스", channel: "닥터써클 · 허리베개", views: 3100000, duration: "0:30", region: "domestic", platform: "instagram" },
+  { title: "허리베개 | 재택근무 허리 세우기 15초 데모 광고", channel: "닥터써클 · 허리베개", views: 2700000, duration: "0:15", region: "domestic", platform: "instagram" },
+  { title: "자동차 허리쿠션 | 장거리 운전 허리 뻐근함 해결 상황극", channel: "닥터써클 · 자동차 허리쿠션", views: 2300000, duration: "0:35", region: "domestic", platform: "instagram" },
+  { title: "자동차 허리쿠션 | 운전 자세 교정 인포그래픽 릴스", channel: "닥터써클 · 자동차 허리쿠션", views: 1900000, duration: "0:26", region: "domestic", platform: "instagram" },
+  { title: "차량용 목쿠션 | 신호대기 중 꾸벅, 목 받쳐주는 순간 광고", channel: "닥터써클 · 차량용 목쿠션", views: 1600000, duration: "0:20", region: "domestic", platform: "instagram" },
+  { title: "차량용 목쿠션 | 조수석 낮잠 편안함 감성 ASMR 릴스", channel: "닥터써클 · 차량용 목쿠션", views: 1300000, duration: "0:33", region: "domestic", platform: "instagram" },
+  { title: "허리보호대 | 무거운 짐 들기 전·후 코어 잡아주는 데모 광고", channel: "닥터써클 · 허리보호대", views: 1000000, duration: "0:24", region: "domestic", platform: "instagram" },
+  { title: "허리보호대 | 물류·택배 근무자 하루 착용 시네마틱 광고", channel: "닥터써클 · 허리보호대", views: 780000, duration: "0:40", region: "domestic", platform: "instagram" },
+  // ── 인스타그램 · 해외 (Dr.Circle product ad ideas) ──
+  { title: "Cervical Pillow | 'Wake up pain-free' before/after reel", channel: "Dr.Circle · Cervical Pillow", views: 5400000, duration: "0:27", region: "overseas", platform: "instagram" },
+  { title: "Lumbar Pillow | Desk posture fix in 15s (demo ad)", channel: "Dr.Circle · Lumbar Pillow", views: 3800000, duration: "0:15", region: "overseas", platform: "instagram" },
+  { title: "Car Lumbar Cushion | Long-drive back relief story reel", channel: "Dr.Circle · Car Lumbar Cushion", views: 2600000, duration: "0:34", region: "overseas", platform: "instagram" },
+  { title: "Car Neck Cushion | Passenger nap comfort ASMR reel", channel: "Dr.Circle · Car Neck Cushion", views: 1700000, duration: "0:30", region: "overseas", platform: "instagram" },
+  { title: "Back Support Belt | Lift-safe core support (demo ad)", channel: "Dr.Circle · Back Support Belt", views: 1200000, duration: "0:22", region: "overseas", platform: "instagram" },
 ];
 
 // ────────────────────────────── 컴포넌트 ──────────────────────────────
@@ -517,10 +521,19 @@ export default function Page() {
               ))}
             </div>
           </div>
-          <p className="mb-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-            🛒 <b>제품 판매</b>에 효과적인 영상(리뷰·언박싱·라이브커머스 등)만
-            모았습니다. <b>연예인 광고 영상은 제외</b>했습니다.
-          </p>
+          {platform === "instagram" ? (
+            <p className="mb-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+              📸 <b>닥터써클 스토어 제품</b>(경추베개·허리베개·자동차 허리쿠션·차량용
+              목쿠션·허리보호대)으로 <b>인스타그램에서 만들 수 있는 광고 콘셉트</b>를
+              추천합니다. 조건에 따라 <b>연예인 출연·후기·언박싱은 제외</b>했고, 각
+              카드는 참고용 레퍼런스 영상으로 연결됩니다.
+            </p>
+          ) : (
+            <p className="mb-5 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+              🛒 <b>제품 판매</b>에 효과적인 영상(리뷰·언박싱·라이브커머스 등)만
+              모았습니다. <b>연예인 광고 영상은 제외</b>했습니다.
+            </p>
+          )}
         </>
       )}
 
