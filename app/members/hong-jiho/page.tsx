@@ -428,9 +428,13 @@ type Metric = {
   avg7: number | null; // 최근 7일 기준 일평균 소진량
   avg30: number | null; // 최근 30일 기준 일평균 소진량
   maxDaily: number | null; // 최고 일 소진량
-  minDaily: number | null; // 최소 일 소진량
-  daysLeft: number | null; // 소진까지 남은 일수 (7일 평균 기준)
+  minDaily: number | null; // 최소 일 소진량(0 제외)
+  daysLeft: number | null; // 소진까지 남은 일수 (30일 평균 기준)
   depletionDate: string | null;
+  daysLeftLo: number | null; // 소진까지 범위 하단(빨리 소진)
+  daysLeftHi: number | null; // 소진까지 범위 상단(늦게 소진)
+  depLo: string | null; // 예상 소진일 범위(이른 날)
+  depHi: string | null; // 예상 소진일 범위(늦은 날)
   basis: "out" | "stock" | null; // 계산 근거
 };
 function computeMetric(product: string, snaps: Snapshot[]): Metric {
@@ -450,6 +454,10 @@ function computeMetric(product: string, snaps: Snapshot[]): Metric {
     minDaily: null,
     daysLeft: null,
     depletionDate: null,
+    daysLeftLo: null,
+    daysLeftHi: null,
+    depLo: null,
+    depHi: null,
     basis: null,
   };
 
@@ -483,15 +491,45 @@ function computeMetric(product: string, snaps: Snapshot[]): Metric {
       const win = series.filter((s) => s.date >= from);
       return win.length ? win.reduce((a, b) => a + b.v, 0) / win.length : null;
     };
+    const windowVals = (days: number) => {
+      const from = shiftDate(lastDate, -(days - 1));
+      return series.filter((s) => s.date >= from).map((s) => s.v);
+    };
     const avg7 = windowAvg(7);
     const avg30 = windowAvg(30);
     const vals = series.map((s) => s.v);
-    const maxDaily = Math.max(...vals);
-    const minDaily = Math.min(...vals);
+    const maxDaily = vals.length ? Math.max(...vals) : null;
+    const positives = vals.filter((v) => v > 0); // 0 제외
+    const minDaily = positives.length ? Math.min(...positives) : null;
     // 소진까지/예상소진일은 30일 평균(안정적) 기준, 없으면 7일 평균으로 폴백.
     // 30일 창은 데이터가 쌓일수록 완전한 4주+ 표본이 되어 예측이 정확해짐.
     const rate = avg30 && avg30 > 0 ? avg30 : avg7 && avg7 > 0 ? avg7 : null;
     const daysLeft = rate ? Math.round(current / rate) : null;
+
+    // 소진일 예상 범위: 하루 소진량의 표준편차(σ)로 누적 수요 불확실성 추정.
+    // 소진 시점의 흔들림 ≈ σ·√(남은일수)/평균  (멀수록·변동 클수록 범위가 넓어짐)
+    let daysLeftLo: number | null = null;
+    let daysLeftHi: number | null = null;
+    let depLo: string | null = null;
+    let depHi: string | null = null;
+    if (rate && rate > 0 && current > 0) {
+      const w = windowVals(30).length ? windowVals(30) : windowVals(7);
+      const m = w.reduce((a, b) => a + b, 0) / w.length;
+      const variance =
+        w.length > 1
+          ? w.reduce((a, b) => a + (b - m) ** 2, 0) / (w.length - 1)
+          : 0;
+      const sd = Math.sqrt(variance);
+      const h0 = current / rate;
+      const band = m > 0 ? (sd * Math.sqrt(h0)) / m : 0;
+      daysLeftLo = Math.max(0, Math.round(h0 - band));
+      daysLeftHi = Math.round(h0 + band);
+      if (lastStockDate) {
+        depLo = addDays(lastStockDate, daysLeftLo);
+        depHi = addDays(lastStockDate, daysLeftHi);
+      }
+    }
+
     return {
       current,
       avg7,
@@ -501,6 +539,10 @@ function computeMetric(product: string, snaps: Snapshot[]): Metric {
       daysLeft,
       depletionDate:
         daysLeft !== null && lastStockDate ? addDays(lastStockDate, daysLeft) : null,
+      daysLeftLo,
+      daysLeftHi,
+      depLo,
+      depHi,
       basis: "out",
     };
   }
@@ -524,6 +566,10 @@ function computeMetric(product: string, snaps: Snapshot[]): Metric {
       minDaily: null,
       daysLeft,
       depletionDate: lastStockDate ? addDays(lastStockDate, daysLeft) : null,
+      daysLeftLo: null,
+      daysLeftHi: null,
+      depLo: null,
+      depHi: null,
       basis: "stock",
     };
   }
@@ -963,15 +1009,49 @@ export default function Page() {
                       <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-neutral-500 dark:text-neutral-400">
                         {fmt1(m.minDaily)}
                       </td>
-                      <td
-                        className={`whitespace-nowrap px-4 py-3 text-center font-semibold tabular-nums ${s.textCls}`}
-                      >
-                        {m.daysLeft !== null ? `${m.daysLeft}일` : "-"}
+                      <td className="group relative whitespace-nowrap px-4 py-3 text-center">
+                        <span className={`font-semibold tabular-nums ${s.textCls}`}>
+                          {m.daysLeft !== null ? `${m.daysLeft}일` : "-"}
+                        </span>
+                        {m.daysLeft !== null && (
+                          <div className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 hidden w-[220px] -translate-x-1/2 group-hover:block">
+                            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-left text-xs shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+                              <div className="font-semibold">
+                                소진까지 약 {m.daysLeft}일
+                              </div>
+                              {m.daysLeftLo !== null && m.daysLeftHi !== null && (
+                                <div className="mt-1 text-neutral-500 dark:text-neutral-400">
+                                  예상 범위: {m.daysLeftLo}~{m.daysLeftHi}일
+                                </div>
+                              )}
+                              <div className="mt-1 text-[10px] text-neutral-400">
+                                최근 소진량의 변동을 반영한 추정 범위
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </td>
-                      <td
-                        className={`whitespace-nowrap px-4 py-3 text-center font-medium ${s.textCls}`}
-                      >
-                        {m.depletionDate ?? "-"}
+                      <td className="group relative whitespace-nowrap px-4 py-3 text-center">
+                        <span className={`font-medium ${s.textCls}`}>
+                          {m.depletionDate ?? "-"}
+                        </span>
+                        {m.depletionDate && (
+                          <div className="pointer-events-none absolute left-1/2 top-full z-30 mt-1 hidden w-[250px] -translate-x-1/2 group-hover:block">
+                            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-left text-xs shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+                              <div className="font-semibold">
+                                예상 소진일 {m.depletionDate}
+                              </div>
+                              {m.depLo && m.depHi && (
+                                <div className="mt-1 text-neutral-500 dark:text-neutral-400">
+                                  범위: {m.depLo} ~ {m.depHi}
+                                </div>
+                              )}
+                              <div className="mt-1 text-[10px] text-neutral-400">
+                                최근 소진량의 변동을 반영한 추정 범위
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span
