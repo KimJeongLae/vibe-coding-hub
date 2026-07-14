@@ -32,6 +32,8 @@ type Snapshot = {
 // 헤더 행을 찾을 때 쓰는 키워드 (열 선택은 아래 score* 함수가 담당)
 const NAME_KEYS = ["제품", "상품", "품명", "품목", "name", "product"];
 const QTY_KEYS = ["재고", "수량", "현재고", "잔량", "stock", "qty"];
+// 아예 수집/표시하지 않을 제품명 (사용자 요청)
+const EXCLUDE_NAMES = ["기타상품"];
 
 // ── CSV 파싱 (따옴표/줄바꿈 처리) ─────────────────────────────
 function parseCSV(text: string): string[][] {
@@ -328,7 +330,8 @@ function buildSnapshots(
   const SKIP_NAMES = ["합계", "총계", "소계", "total", "sum"]; // 요약 행 제외
   for (const r of dataRows) {
     const name = (r[nameIdx] ?? "").trim();
-    if (!name || includesAny(name, SKIP_NAMES)) continue;
+    if (!name || includesAny(name, SKIP_NAMES) || includesAny(name, EXCLUDE_NAMES))
+      continue;
     const stock = num(r[qtyIdx] ?? "");
     if (stock === null) continue; // 재고량 없는 행은 스킵
     const out = outIdx >= 0 ? num(r[outIdx] ?? "") : null;
@@ -388,8 +391,11 @@ function shiftDate(dateStr: string, delta: number) {
 }
 type Metric = {
   current: number;
-  avgDaily: number | null;
-  daysLeft: number | null;
+  avg7: number | null; // 최근 7일 기준 일평균 소진량
+  avg30: number | null; // 최근 30일 기준 일평균 소진량
+  maxDaily: number | null; // 최고 일 소진량
+  minDaily: number | null; // 최소 일 소진량
+  daysLeft: number | null; // 소진까지 남은 일수 (7일 평균 기준)
   depletionDate: string | null;
   basis: "out" | "stock" | null; // 계산 근거
 };
@@ -400,7 +406,18 @@ function computeMetric(product: string, snaps: Snapshot[]): Metric {
     .map((s) => ({ date: s.date, v: s.stock[product] }))
     .sort((a, b) => a.date.localeCompare(b.date));
   const current = stockPts.length ? stockPts[stockPts.length - 1].v : 0;
-  const lastDate = stockPts.length ? stockPts[stockPts.length - 1].date : null;
+  const lastStockDate = stockPts.length ? stockPts[stockPts.length - 1].date : null;
+
+  const empty: Metric = {
+    current,
+    avg7: null,
+    avg30: null,
+    maxDaily: null,
+    minDaily: null,
+    daysLeft: null,
+    depletionDate: null,
+    basis: null,
+  };
 
   // 일일 출고량 시계열 (오름차순)
   const outPts = snaps
@@ -408,12 +425,9 @@ function computeMetric(product: string, snaps: Snapshot[]): Metric {
     .map((s) => ({ date: s.date, v: s.out[product] }))
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  let avgDaily: number | null = null;
-  let basis: Metric["basis"] = null;
-
   if (outPts.length >= 1 && outPts.some((p) => p.v > 0)) {
     // [출고량 기준] 주말(토·일)은 반출이 없으므로,
-    // 월요일 출고량을 토·일·월 3일로 나눠(÷3) 각 날에 배분해 하루 평균을 구함.
+    // 월요일 출고량을 토·일·월 3일로 나눠(÷3) 각 날에 배분한 "일별 소진량" 시계열.
     const adj = new Map<string, number>(outPts.map((p) => [p.date, p.v]));
     for (const p of outPts) {
       if (weekday(p.date) === 1) {
@@ -425,32 +439,67 @@ function computeMetric(product: string, snaps: Snapshot[]): Metric {
         if (adj.has(sun)) adj.set(sun, share);
       }
     }
-    const vals = Array.from(adj.values());
-    avgDaily = vals.reduce((a, b) => a + b, 0) / vals.length;
-    basis = "out";
-  } else if (stockPts.length >= 2) {
-    // [폴백] 출고 데이터가 없으면 재고 감소분으로 추정 (재입고 증가분 제외)
+    const series = Array.from(adj, ([date, v]) => ({ date, v })).sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
+    const lastDate = series[series.length - 1].date;
+    // 최근 N일 창(window)의 평균
+    const windowAvg = (days: number) => {
+      const from = shiftDate(lastDate, -(days - 1));
+      const win = series.filter((s) => s.date >= from);
+      return win.length ? win.reduce((a, b) => a + b.v, 0) / win.length : null;
+    };
+    const avg7 = windowAvg(7);
+    const avg30 = windowAvg(30);
+    const vals = series.map((s) => s.v);
+    const maxDaily = Math.max(...vals);
+    const minDaily = Math.min(...vals);
+    // 소진까지/예상소진일은 최근 추세(7일 평균) 기준, 없으면 30일 평균
+    const rate = avg7 && avg7 > 0 ? avg7 : avg30 && avg30 > 0 ? avg30 : null;
+    const daysLeft = rate ? Math.round(current / rate) : null;
+    return {
+      current,
+      avg7,
+      avg30,
+      maxDaily,
+      minDaily,
+      daysLeft,
+      depletionDate:
+        daysLeft !== null && lastStockDate ? addDays(lastStockDate, daysLeft) : null,
+      basis: "out",
+    };
+  }
+
+  if (stockPts.length >= 2) {
+    // [폴백] 출고 데이터가 없으면 재고 감소분으로 하루 평균만 추정 (7/30 동일값)
     let consumed = 0;
     for (let i = 1; i < stockPts.length; i++) {
       const diff = stockPts[i - 1].v - stockPts[i].v;
       if (diff > 0) consumed += diff;
     }
     const span = daysBetween(stockPts[0].date, stockPts[stockPts.length - 1].date);
-    avgDaily = span > 0 ? consumed / span : null;
-    basis = "stock";
+    const avg = span > 0 ? consumed / span : null;
+    if (!avg || avg <= 0) return empty;
+    const daysLeft = Math.round(current / avg);
+    return {
+      current,
+      avg7: avg,
+      avg30: avg,
+      maxDaily: null,
+      minDaily: null,
+      daysLeft,
+      depletionDate: lastStockDate ? addDays(lastStockDate, daysLeft) : null,
+      basis: "stock",
+    };
   }
 
-  if (!avgDaily || avgDaily <= 0)
-    return { current, avgDaily: avgDaily ?? 0, daysLeft: null, depletionDate: null, basis };
-
-  const daysLeft = Math.round(current / avgDaily);
-  return {
-    current,
-    avgDaily,
-    daysLeft,
-    depletionDate: lastDate ? addDays(lastDate, daysLeft) : null,
-    basis,
-  };
+  return empty;
+}
+function fmt1(n: number | null) {
+  if (n === null) return "-";
+  return (Math.round(n * 10) / 10).toLocaleString(undefined, {
+    maximumFractionDigits: 1,
+  });
 }
 function statusFor(daysLeft: number | null) {
   if (daysLeft === null)
@@ -521,7 +570,8 @@ export default function Page() {
     const seen: string[] = [];
     for (const s of sorted)
       for (const name of Object.keys(s.stock))
-        if (!seen.includes(name)) seen.push(name);
+        if (!seen.includes(name) && !includesAny(name, EXCLUDE_NAMES))
+          seen.push(name);
     return seen;
   }, [sorted]);
   const dates = useMemo(() => sorted.map((s) => s.date), [sorted]);
@@ -706,7 +756,16 @@ export default function Page() {
                     현재고
                   </th>
                   <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">
-                    일평균 소진
+                    7일 평균 소진
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">
+                    30일 평균 소진
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">
+                    최고 소진
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">
+                    최소 소진
                   </th>
                   <th className="whitespace-nowrap px-4 py-3 text-center font-semibold">
                     소진까지
@@ -763,8 +822,17 @@ export default function Page() {
                       <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums">
                         {m.current.toLocaleString()}
                       </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
+                        {fmt1(m.avg7)}
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-neutral-500 dark:text-neutral-400">
-                        {m.avgDaily && m.avgDaily > 0 ? m.avgDaily.toFixed(1) : "-"}
+                        {fmt1(m.avg30)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-neutral-500 dark:text-neutral-400">
+                        {fmt1(m.maxDaily)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-neutral-500 dark:text-neutral-400">
+                        {fmt1(m.minDaily)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-center tabular-nums">
                         {m.daysLeft !== null ? (
@@ -804,10 +872,12 @@ export default function Page() {
       </section>
 
       <p className="mt-4 text-xs text-neutral-400">
-        * 소진 예측은 <b>일일 출고량(평균일일배송수량)</b>을 기준으로 하루 평균 소진량을
-        구해 계산합니다. 주말(토·일)은 반출이 없으므로 <b>월요일 출고량을 토·일·월 3일로
-        나눠(÷3)</b> 반영합니다. 출고량 데이터가 없으면 재고 감소분으로 추정하며,
-        데이터(날짜)가 많을수록 정확해집니다.
+        * 소진량은 <b>일일 출고량(평균일일배송수량)</b> 기준입니다. 주말(토·일)은 반출이
+        없으므로 <b>월요일 출고량을 토·일·월 3일로 나눠(÷3)</b> 반영합니다.{" "}
+        <b>7일 / 30일 평균</b>은 최근 해당 기간의 일평균, <b>최고·최소 소진</b>은 기록된
+        전체 기간 중 하루 최대·최소 소진량입니다. <b>소진까지·예상 소진일</b>은 최근
+        7일 평균(없으면 30일 평균) 기준으로 계산합니다. 출고량 데이터가 없으면 재고
+        감소분으로 추정합니다.
       </p>
     </MemberShell>
   );
