@@ -58,6 +58,16 @@ function orderRank(name: string) {
   }
   return PRODUCT_ORDER.length; // 목록에 없으면 맨 뒤
 }
+// 제품별 재고 그래프 Y축 눈금 단위 (지정 없으면 null → 자동)
+function stepForProduct(name: string): number | null {
+  const n = normalizeName(name);
+  if (n.includes("허리보호대")) return 100; // 허리보호대 S/M/L/XL
+  if (n.includes("등받이쿠션")) return 1000; // 차량용 등받이쿠션
+  if (n.includes("목쿠션")) return 500; // 차량용 목쿠션
+  if (n.endsWith("경추베개커버")) return 500; // 경추베개 커버
+  if (n.endsWith("허리베개")) return 500; // 허리베개
+  return null; // 그 외(경추베개 등)는 자동
+}
 
 // ── CSV 파싱 (따옴표/줄바꿈 처리) ─────────────────────────────
 function parseCSV(text: string): string[][] {
@@ -565,6 +575,10 @@ export default function Page() {
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<string | null>(null); // 상세 달력 모달 대상 제품
   const [calYM, setCalYM] = useState<{ y: number; m: number }>({ y: 2026, m: 0 });
+  const [resetOpen, setResetOpen] = useState(false); // 초기화 모달
+  const [resetFrom, setResetFrom] = useState("");
+  const [resetTo, setResetTo] = useState("");
+  const [pendingReset, setPendingReset] = useState<null | "range" | "all">(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -738,10 +752,30 @@ export default function Page() {
       return { y: d.getUTCFullYear(), m: d.getUTCMonth() };
     });
   }
-  function resetAll() {
+  function openReset() {
+    setResetFrom(dates.length ? dates[0] : "");
+    setResetTo(dates.length ? dates[dates.length - 1] : "");
+    setPendingReset(null);
+    setResetOpen(true);
+  }
+  function closeReset() {
+    setResetOpen(false);
+    setPendingReset(null);
+  }
+  function doResetRange() {
+    let a = resetFrom;
+    let b = resetTo;
+    if (a && b && a > b) [a, b] = [b, a]; // 시작>종료면 교체
+    setSnapshots((prev) => prev.filter((s) => !(s.date >= a && s.date <= b)));
+    setNotice("");
+    setError("");
+    closeReset();
+  }
+  function doResetAll() {
     setSnapshots([]);
     setNotice("");
     setError("");
+    closeReset();
   }
 
   return (
@@ -799,10 +833,10 @@ export default function Page() {
 
           {snapshots.length > 0 && (
             <button
-              onClick={resetAll}
+              onClick={openReset}
               className="ml-auto rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950"
             >
-              전체 초기화
+              초기화
             </button>
           )}
         </div>
@@ -1016,7 +1050,10 @@ export default function Page() {
                   <div className="mb-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
                     최근 30일 재고 추이
                   </div>
-                  <StockChart data={detailChart} />
+                  <StockChart
+                    data={detailChart}
+                    unit={stepForProduct(detail) ?? undefined}
+                  />
                 </div>
               </div>
               {/* 전체 기간 표 */}
@@ -1056,6 +1093,103 @@ export default function Page() {
                 </table>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 초기화 모달: 기간 지정 삭제 / 전체 초기화 (확인 후 실행) */}
+      {resetOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={closeReset}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl dark:bg-neutral-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">재고 데이터 초기화</h3>
+              <button
+                onClick={closeReset}
+                aria-label="닫기"
+                className="rounded px-2 py-1 text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                ✕
+              </button>
+            </div>
+
+            {pendingReset ? (
+              <div className="mt-6 text-center">
+                <p className="text-sm text-neutral-600 dark:text-neutral-300">
+                  {pendingReset === "all"
+                    ? "모든 재고 데이터를 삭제합니다."
+                    : `${resetFrom} ~ ${resetTo} 구간의 데이터를 삭제합니다.`}
+                </p>
+                <p className="mt-2 text-base font-semibold">
+                  정말 초기화 하시겠습니까?
+                </p>
+                <div className="mt-5 flex justify-center gap-2">
+                  <button
+                    onClick={pendingReset === "all" ? doResetAll : doResetRange}
+                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
+                  >
+                    예, 초기화
+                  </button>
+                  <button
+                    onClick={() => setPendingReset(null)}
+                    className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium transition-colors hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                  >
+                    아니오
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
+                  삭제할 <b>기간</b>을 지정해 지우거나, 아래에서 전체를 초기화할 수
+                  있습니다.
+                </p>
+                <div className="mt-4 flex flex-wrap items-end gap-3">
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-neutral-500 dark:text-neutral-400">
+                      시작일
+                    </span>
+                    <input
+                      type="date"
+                      value={resetFrom}
+                      onChange={(e) => setResetFrom(e.target.value)}
+                      className="rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-neutral-700"
+                    />
+                  </label>
+                  <label className="grid gap-1 text-sm">
+                    <span className="text-neutral-500 dark:text-neutral-400">
+                      종료일
+                    </span>
+                    <input
+                      type="date"
+                      value={resetTo}
+                      onChange={(e) => setResetTo(e.target.value)}
+                      className="rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-neutral-700"
+                    />
+                  </label>
+                  <button
+                    onClick={() => setPendingReset("range")}
+                    disabled={!resetFrom || !resetTo}
+                    className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-40"
+                  >
+                    선택 구간 삭제
+                  </button>
+                </div>
+                <div className="mt-5 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+                  <button
+                    onClick={() => setPendingReset("all")}
+                    className="rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950"
+                  >
+                    전체 초기화
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1142,7 +1276,13 @@ function niceStep(max: number) {
 }
 
 // 최근 재고 추이 라인 그래프 (외부 라이브러리 없이 SVG) — X/Y축 눈금 포함
-function StockChart({ data }: { data: { date: string; stock: number }[] }) {
+function StockChart({
+  data,
+  unit,
+}: {
+  data: { date: string; stock: number }[];
+  unit?: number;
+}) {
   if (data.length < 2)
     return (
       <p className="text-center text-[11px] text-neutral-400">
@@ -1158,7 +1298,7 @@ function StockChart({ data }: { data: { date: string; stock: number }[] }) {
   const plotW = W - mL - mR;
   const plotH = H - mT - mB;
   const max = Math.max(...data.map((d) => d.stock), 1);
-  const step = niceStep(max);
+  const step = unit && unit > 0 ? unit : niceStep(max);
   const yMax = Math.max(step, Math.ceil(max / step) * step);
   const ticks: number[] = [];
   for (let v = 0; v <= yMax + 1e-6; v += step) ticks.push(Math.round(v));
