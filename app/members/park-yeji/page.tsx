@@ -27,6 +27,8 @@ const FALLBACK_CATEGORY = "그외 인쇄물";
 type Comment = { id: string; text: string; at: string };
 // 이미지 위 표기(빨간 네모) — 좌표는 이미지 기준 0~1 비율
 type Rect = { id: string; x: number; y: number; w: number; h: number };
+// 진행 상태: 컨펌 모드의 코멘트/표기 → "수정요청", 디자이너의 이미지 교체 → "수정완료"
+type DesignStatus = "none" | "revision_requested" | "revision_done";
 type Design = {
   id: string;
   src: string; // data URL
@@ -35,6 +37,7 @@ type Design = {
   confirmed: boolean;
   comments: Comment[];
   annotations: Rect[];
+  status: DesignStatus;
 };
 type Role = "designer" | "reviewer";
 
@@ -178,6 +181,11 @@ export default function Page() {
               ? d.category
               : FALLBACK_CATEGORY,
             annotations: Array.isArray(d.annotations) ? d.annotations : [],
+            status:
+              d.status === "revision_requested" ||
+              d.status === "revision_done"
+                ? d.status
+                : "none",
           })),
         );
       }
@@ -289,6 +297,7 @@ export default function Page() {
             confirmed: false,
             comments: [],
             annotations: [],
+            status: "none",
           },
         ]);
       };
@@ -317,6 +326,7 @@ export default function Page() {
                 name: file.name,
                 confirmed: false, // 새 이미지이므로 컨펌·표기 초기화
                 annotations: [],
+                status: "revision_done", // 디자이너가 교체함 → 컨펌 모드에 "수정완료"
               }
             : d,
         ),
@@ -349,6 +359,7 @@ export default function Page() {
                 ...d.comments,
                 { id: makeId(), text, at: new Date().toLocaleString("ko-KR") },
               ],
+              status: "revision_requested", // 컨펌 모드 코멘트 → 디자이너에 "수정요청"
             }
           : d,
       ),
@@ -370,7 +381,11 @@ export default function Page() {
     setDesigns((prev) =>
       prev.map((d) =>
         d.id === designId
-          ? { ...d, annotations: [...d.annotations, rect] }
+          ? {
+              ...d,
+              annotations: [...d.annotations, rect],
+              status: "revision_requested", // 컨펌 모드 표기 → 디자이너에 "수정요청"
+            }
           : d,
       ),
     );
@@ -739,6 +754,17 @@ export default function Page() {
                         {d.confirmed && <ConfirmStamp small />}
                       </button>
 
+                      {isDesigner && d.status === "revision_requested" && (
+                        <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-full bg-red-500 px-2 py-0.5 text-[11px] font-semibold text-white shadow">
+                          수정요청
+                        </span>
+                      )}
+                      {!isDesigner && d.status === "revision_done" && (
+                        <span className="pointer-events-none absolute left-2 top-2 z-10 rounded-full bg-blue-500 px-2 py-0.5 text-[11px] font-semibold text-white shadow">
+                          수정완료
+                        </span>
+                      )}
+
                       {isDesigner && (
                         <button
                           type="button"
@@ -784,9 +810,16 @@ export default function Page() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between gap-2 border-b border-neutral-200 p-4 dark:border-neutral-800">
-              <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
-                {opened.category}
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                  {opened.category}
+                </span>
+                {opened.status === "revision_requested" && (
+                  <span className="rounded-full bg-red-500 px-2 py-0.5 text-[11px] font-semibold text-white">
+                    수정요청
+                  </span>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={closeModal}
@@ -885,6 +918,11 @@ export default function Page() {
                         {idx === 0 && (
                           <span className="pointer-events-none absolute left-2 top-2 z-30 rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-semibold text-white">
                             방금 클릭한 시안
+                          </span>
+                        )}
+                        {d.status === "revision_done" && (
+                          <span className="pointer-events-none absolute right-2 top-2 z-30 rounded-full bg-blue-500 px-2 py-0.5 text-[11px] font-semibold text-white">
+                            수정완료
                           </span>
                         )}
                         {/* eslint-disable-next-line @next/next/no-img-element */}
