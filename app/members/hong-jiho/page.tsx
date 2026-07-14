@@ -1025,24 +1025,29 @@ export default function Page() {
                   <thead className="sticky top-0 bg-white dark:bg-neutral-900">
                     <tr className="border-b border-neutral-200 text-left text-xs text-neutral-500 dark:border-neutral-700">
                       <th className="py-2 pr-3">날짜</th>
-                      <th className="py-2 pr-3 text-right">재고</th>
-                      <th className="py-2 text-right">소진</th>
+                      <th className="py-2 pr-3 text-right">소진</th>
+                      <th className="py-2 text-right">재고</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(dayDataByProduct[detail]?.datesDesc ?? []).map((d) => {
                       const info = dayDataByProduct[detail].map[d];
+                      const o = info.out;
                       return (
                         <tr
                           key={d}
                           className="border-b border-neutral-100 dark:border-neutral-800"
                         >
                           <td className="py-1.5 pr-3 tabular-nums">{d}</td>
-                          <td className="py-1.5 pr-3 text-right font-medium tabular-nums">
-                            {info.stock?.toLocaleString() ?? "-"}
+                          <td
+                            className={`py-1.5 pr-3 text-right tabular-nums ${
+                              o ? "text-red-500" : "text-neutral-400"
+                            }`}
+                          >
+                            {o == null ? "-" : o === 0 ? "0" : `-${o.toLocaleString()}`}
                           </td>
-                          <td className="py-1.5 text-right tabular-nums text-neutral-500">
-                            {info.out ?? "-"}
+                          <td className="py-1.5 text-right font-medium tabular-nums">
+                            {info.stock?.toLocaleString() ?? "-"}
                           </td>
                         </tr>
                       );
@@ -1128,7 +1133,15 @@ function MonthCalendar({
   );
 }
 
-// 최근 재고 추이 라인 그래프 (외부 라이브러리 없이 SVG)
+// Y축 눈금 간격을 데이터 규모에 맞춰 '깔끔한 수'로 (예: 재고 ~2400 → 1000 단위)
+function niceStep(max: number) {
+  const rough = max / 4 || 1; // 눈금 4~5개 목표
+  const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+  const cands = [1, 2, 2.5, 5, 10].map((c) => c * pow);
+  return cands.find((c) => c >= rough) ?? 10 * pow;
+}
+
+// 최근 재고 추이 라인 그래프 (외부 라이브러리 없이 SVG) — X/Y축 눈금 포함
 function StockChart({ data }: { data: { date: string; stock: number }[] }) {
   if (data.length < 2)
     return (
@@ -1136,35 +1149,70 @@ function StockChart({ data }: { data: { date: string; stock: number }[] }) {
         그래프를 그리려면 날짜 데이터가 2일 이상 필요합니다.
       </p>
     );
-  const W = 320;
-  const H = 110;
-  const padX = 6;
-  const padY = 10;
+  const W = 360;
+  const H = 190;
+  const mL = 42; // Y축 라벨 영역
+  const mR = 10;
+  const mT = 10;
+  const mB = 26; // X축 라벨 영역
+  const plotW = W - mL - mR;
+  const plotH = H - mT - mB;
   const max = Math.max(...data.map((d) => d.stock), 1);
-  const min = Math.min(...data.map((d) => d.stock), 0);
-  const span = max - min || 1;
-  const px = (i: number) => padX + (i / (data.length - 1)) * (W - padX * 2);
-  const py = (v: number) => padY + (1 - (v - min) / span) * (H - padY * 2);
+  const step = niceStep(max);
+  const yMax = Math.max(step, Math.ceil(max / step) * step);
+  const ticks: number[] = [];
+  for (let v = 0; v <= yMax + 1e-6; v += step) ticks.push(Math.round(v));
+  const px = (i: number) => mL + (i / (data.length - 1)) * plotW;
+  const py = (v: number) => mT + (1 - v / yMax) * plotH;
   const line = data.map((d, i) => `${px(i)},${py(d.stock)}`).join(" ");
-  const area = `${px(0)},${H - padY} ${line} ${px(data.length - 1)},${H - padY}`;
+  const area = `${px(0)},${mT + plotH} ${line} ${px(data.length - 1)},${mT + plotH}`;
+  // X축: 5일 간격 + 마지막 날
+  const xIdx: number[] = [];
+  for (let i = 0; i < data.length; i += 5) xIdx.push(i);
+  if (xIdx[xIdx.length - 1] !== data.length - 1) xIdx.push(data.length - 1);
   return (
-    <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="none">
-        <polygon points={area} className="fill-red-500/10" />
-        <polyline
-          points={line}
-          fill="none"
-          className="stroke-red-500"
-          strokeWidth={2}
-          vectorEffect="non-scaling-stroke"
-        />
-      </svg>
-      <div className="flex justify-between text-[10px] text-neutral-400">
-        <span>{data[0].date.slice(5)}</span>
-        <span>최대 {max.toLocaleString()}</span>
-        <span>{data[data.length - 1].date.slice(5)}</span>
-      </div>
-    </div>
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+      {ticks.map((v) => (
+        <g key={v}>
+          <line
+            x1={mL}
+            y1={py(v)}
+            x2={W - mR}
+            y2={py(v)}
+            className="stroke-neutral-200 dark:stroke-neutral-700"
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+          <text
+            x={mL - 6}
+            y={py(v) + 3}
+            textAnchor="end"
+            className="fill-neutral-400 text-[9px]"
+          >
+            {v.toLocaleString()}
+          </text>
+        </g>
+      ))}
+      <polygon points={area} className="fill-red-500/10" />
+      <polyline
+        points={line}
+        fill="none"
+        className="stroke-red-500"
+        strokeWidth={2}
+        vectorEffect="non-scaling-stroke"
+      />
+      {xIdx.map((i) => (
+        <text
+          key={i}
+          x={px(i)}
+          y={H - 8}
+          textAnchor="middle"
+          className="fill-neutral-400 text-[9px]"
+        >
+          {data[i].date.slice(5)}
+        </text>
+      ))}
+    </svg>
   );
 }
 
