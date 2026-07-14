@@ -287,12 +287,12 @@ function scoreDate(h: string) {
 // '배송수량구분' 같은 구분/텍스트 열은 제외.
 function scoreShipped(h: string) {
   const c = h.trim().toLowerCase().replace(/[\s()]/g, "");
-  if (c.includes("구분")) return 0;
-  if (c.includes("평균") && c.includes("배송")) return 6; // 평균일일배송수량
-  if (c.includes("평균일일")) return 6;
-  if (c === "배송수량" || c === "배송수량전체") return 5;
+  if (c.includes("구분")) return 0; // '배송수량구분' 등 제외
+  if (c.includes("배송수량총") || c.includes("배송수량전체")) return 7; // 배송수량(총) 최우선
+  if (c === "배송수량") return 6;
   if (c.includes("출고수량") || c.includes("판매수량")) return 5;
-  if (c.includes("배송수량") || c.includes("출고량") || c.includes("판매량")) return 4;
+  if (c.includes("평균") && c.includes("배송")) return 4; // 평균일일배송수량(차선)
+  if (c.includes("배송수량") || c.includes("출고량") || c.includes("판매량")) return 3;
   if (c.includes("출고") || c.includes("판매")) return 2;
   return 0;
 }
@@ -620,25 +620,45 @@ export default function Page() {
     return map;
   }, [products, sorted]);
 
-  // 제품별 날짜→{재고, 소진} 맵 + 날짜 목록(최신순) — 달력/상세표에 사용
+  // 제품별 날짜→{재고, 소진} 맵 + 날짜 목록(최신순) — 달력/상세표/그래프에 사용
+  // 파일엔 '그날의 재고'가 없고 '현재고'만 있어, 현재고에서 이후 출고량을 역산해 날짜별 재고를 복원.
+  //   재고[d] = 현재고 + (d 이후 모든 날의 출고량 합)   ← 마지막 입고 이후 구간은 정확
   const dayDataByProduct = useMemo(() => {
     const res: Record<
       string,
       { map: Record<string, { stock?: number; out?: number }>; datesDesc: string[] }
     > = {};
     for (const p of products) {
-      const map: Record<string, { stock?: number; out?: number }> = {};
-      const ds: string[] = [];
+      const rows: { date: string; rawStock?: number; out?: number }[] = [];
       for (const s of sorted) {
         if (s.stock[p] !== undefined || s.out[p] !== undefined) {
-          map[s.date] = { stock: s.stock[p], out: s.out[p] };
-          ds.push(s.date);
+          rows.push({ date: s.date, rawStock: s.stock[p], out: s.out[p] });
         }
       }
-      res[p] = { map, datesDesc: ds.reverse() };
+      const current = rows.length ? (rows[rows.length - 1].rawStock ?? 0) : 0;
+      const map: Record<string, { stock?: number; out?: number }> = {};
+      const datesDesc: string[] = [];
+      let acc = 0; // 해당 날짜 이후의 누적 출고량
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const r = rows[i];
+        map[r.date] = { stock: current + acc, out: r.out };
+        datesDesc.push(r.date);
+        acc += r.out ?? 0;
+      }
+      res[p] = { map, datesDesc };
     }
     return res;
   }, [products, sorted]);
+
+  // 상세 모달의 최근 30일 재고 그래프 데이터 (오래된→최신 순)
+  const detailChart = useMemo(() => {
+    if (!detail || !dayDataByProduct[detail]) return [];
+    const dd = dayDataByProduct[detail];
+    return dd.datesDesc
+      .slice(0, 30)
+      .map((d) => ({ date: d, stock: dd.map[d].stock ?? 0 }))
+      .reverse();
+  }, [detail, dayDataByProduct]);
 
   const urgentCount = products.filter(
     (p) => metrics[p].daysLeft !== null && metrics[p].daysLeft! <= 60,
@@ -887,7 +907,7 @@ export default function Page() {
                           {m.current.toLocaleString()}
                         </button>
                         {/* 마우스 오버 시 이번 달 재고 달력 미리보기 */}
-                        <div className="pointer-events-none absolute right-0 top-full z-30 mt-1 hidden w-[300px] group-hover:block">
+                        <div className="pointer-events-none absolute right-0 top-full z-30 mt-1 hidden w-[340px] group-hover:block">
                           <div className="rounded-xl border border-neutral-200 bg-white p-3 text-left shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
                             <MonthCalendar
                               year={latestYM.y}
@@ -936,13 +956,14 @@ export default function Page() {
       </section>
 
       <p className="mt-4 text-xs text-neutral-400">
-        * 소진량은 <b>일일 출고량(평균일일배송수량)</b> 기준입니다. 주말(토·일)은 반출이
+        * 소진량은 엑셀의 <b>배송수량(총)</b>(일일 출고량) 기준입니다. 주말(토·일)은 반출이
         없으므로 <b>월요일 출고량을 토·일·월 3일로 나눠(÷3)</b> 반영합니다.{" "}
-        <b>소진까지·예상 소진일</b>은 <b>최근 30일 평균</b>(없으면 7일 평균) 기준으로
-        계산하며, 데이터가 쌓일수록 정확해집니다. <b>상태</b>는 소진까지 60일 이하{" "}
-        <b>부족(빨강)</b>, 99일 이하 <b>보통(노랑)</b>, 100일 이상 <b>여유(초록)</b>.{" "}
-        <b>현재고 숫자</b>에 마우스를 올리면 이번 달 재고 달력, 클릭하면 과거 전체 달력·표를
-        볼 수 있습니다.
+        <b>소진까지·예상 소진일</b>은 <b>최근 30일 평균 소진량</b>(없으면 7일) 기준이며,
+        데이터가 쌓일수록 정확해집니다. <b>상태</b>는 60일 이하 <b>부족(빨강)</b>, 99일 이하{" "}
+        <b>보통(노랑)</b>, 100일 이상 <b>여유(초록)</b>. 날짜별 재고는 파일에 &lsquo;그날의
+        재고&rsquo;가 없어 <b>현재고에서 이후 출고량을 역산</b>해 복원한 값입니다(마지막 입고
+        이후 구간은 정확). <b>현재고 숫자</b>: 마우스오버=이번 달 달력, 클릭=과거 전체
+        달력·표·그래프.
       </p>
       </div>
 
@@ -967,8 +988,8 @@ export default function Page() {
               </button>
             </div>
             <div className="mt-4 flex flex-col gap-6 md:flex-row">
-              {/* 달력 (월 이동) */}
-              <div className="md:w-[320px] md:shrink-0">
+              {/* 달력 (월 이동) + 재고 그래프 */}
+              <div className="md:w-[380px] md:shrink-0">
                 <div className="mb-2 flex items-center justify-between">
                   <button
                     onClick={() => stepMonth(-1)}
@@ -991,6 +1012,12 @@ export default function Page() {
                 <p className="mt-2 text-[11px] text-neutral-400">
                   각 날짜: 위=재고, 아래=소진(▼)
                 </p>
+                <div className="mt-4">
+                  <div className="mb-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                    최근 30일 재고 추이
+                  </div>
+                  <StockChart data={detailChart} />
+                </div>
               </div>
               {/* 전체 기간 표 */}
               <div className="max-h-[60vh] flex-1 overflow-auto">
@@ -1076,19 +1103,19 @@ function MonthCalendar({
           return (
             <div
               key={i}
-              className={`min-h-[38px] rounded p-1 text-center leading-none ${
+              className={`min-h-[54px] rounded p-1 text-center leading-tight ${
                 info
                   ? "bg-neutral-100 dark:bg-neutral-800"
                   : "bg-neutral-50/40 dark:bg-neutral-900/40"
               }`}
             >
-              <div className="text-[10px] text-neutral-400">{d}</div>
+              <div className="text-[11px] text-neutral-400">{d}</div>
               {info && (
                 <>
-                  <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-red-600 dark:text-red-400">
+                  <div className="mt-0.5 text-[13px] font-semibold tabular-nums text-red-600 dark:text-red-400">
                     {info.stock?.toLocaleString() ?? "-"}
                   </div>
-                  <div className="text-[9px] tabular-nums text-blue-500">
+                  <div className="text-[11px] tabular-nums text-blue-500">
                     ▼{info.out ?? 0}
                   </div>
                 </>
@@ -1096,6 +1123,46 @@ function MonthCalendar({
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// 최근 재고 추이 라인 그래프 (외부 라이브러리 없이 SVG)
+function StockChart({ data }: { data: { date: string; stock: number }[] }) {
+  if (data.length < 2)
+    return (
+      <p className="text-center text-[11px] text-neutral-400">
+        그래프를 그리려면 날짜 데이터가 2일 이상 필요합니다.
+      </p>
+    );
+  const W = 320;
+  const H = 110;
+  const padX = 6;
+  const padY = 10;
+  const max = Math.max(...data.map((d) => d.stock), 1);
+  const min = Math.min(...data.map((d) => d.stock), 0);
+  const span = max - min || 1;
+  const px = (i: number) => padX + (i / (data.length - 1)) * (W - padX * 2);
+  const py = (v: number) => padY + (1 - (v - min) / span) * (H - padY * 2);
+  const line = data.map((d, i) => `${px(i)},${py(d.stock)}`).join(" ");
+  const area = `${px(0)},${H - padY} ${line} ${px(data.length - 1)},${H - padY}`;
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" preserveAspectRatio="none">
+        <polygon points={area} className="fill-red-500/10" />
+        <polyline
+          points={line}
+          fill="none"
+          className="stroke-red-500"
+          strokeWidth={2}
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+      <div className="flex justify-between text-[10px] text-neutral-400">
+        <span>{data[0].date.slice(5)}</span>
+        <span>최대 {max.toLocaleString()}</span>
+        <span>{data[data.length - 1].date.slice(5)}</span>
       </div>
     </div>
   );
