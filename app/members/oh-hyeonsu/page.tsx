@@ -53,6 +53,134 @@ function formatViews(n: number): string {
 
 const AGE_GROUPS = [10, 20, 30, 40, 50, 60, 70];
 
+// 제목 → 실제 YouTube 영상 ID (제목 검색 상위 결과). 썸네일/재생에 사용.
+// ⚠️ YouTube Data API 미사용 — 정적 매핑 + 이미지/임베드만 사용합니다.
+const YT_IDS: Record<string, string> = {
+  "거북목 교정 스트레칭 5분 루틴": "aDbqk7JbpEs",
+  "목 디스크 초기 증상과 자가진단법": "EWioR0syCns",
+  "일자목, 베개 하나로 잡는 법": "rcmDpjDKU1g",
+  "스마트폰 목 통증 예방 습관": "kuNH1c8SQSY",
+  "자고 나면 목이 안 돌아갈 때": "BPDN_1EQBqI",
+  "목·어깨 뭉침 푸는 셀프 마사지": "YtLQFyJF6Y8",
+  "경추 협착증 환자를 위한 안전 운동": "HZhw8uRGvaY",
+  "학생 거북목, 공부자세 교정법": "I8dM2t0xEuE",
+  "목 디스크, 수술 없이 관리하기": "fEJBZuozjgA",
+  "어르신 목 통증 완화 스트레칭": "mUnSpfItRf0",
+  "Fix 'Tech Neck' in 5 Minutes": "R0LskN7fNFg",
+  "Neck Pain Relief: The 90-Second Fix": "B0xlVOJHbiA",
+  "Best Exercises for a Neck Disc": "nqo_4txvD50",
+  "Forward Head Posture Correction": "_xg9z3bY90E",
+  "Cervical Stenosis Safe Exercises": "Z_bysI-yMt8",
+  "오십견, 이 동작 하나면 어깨가 풀립니다": "InieLaiFSaI",
+  "회전근개 파열, 수술해야 할까?": "0NA2uwta8DU",
+  "라운드숄더(굽은 어깨) 교정 운동": "MU_PCU-wkHU",
+  "헬스 중 어깨 통증, 원인과 해결": "R15ColNVDqE",
+  "어깨 충돌증후군 재활 운동": "83rK2U-ANi4",
+  "오십견 초기 증상 자가진단": "H3vdZ7_6H1U",
+  "운동 전 어깨 워밍업 루틴": "u-mxnnQf3MI",
+  "어깨 석회성 건염 관리법": "AAB8jOgIG_U",
+  "어깨 뭉침 풀어주는 스트레칭": "InieLaiFSaI",
+  "어르신 어깨 통증 안전 재활": "g0trhTzLntA",
+  "Frozen Shoulder: Full Recovery Routine": "3s61bO4FnWo",
+  "Rotator Cuff Tear — Surgery or Not?": "ubpzaRjH7vA",
+  "Rounded Shoulders Fix (Posture)": "ApQvSiw4fik",
+  "Shoulder Impingement Rehab": "KM36zdNUzZk",
+  "Shoulder Warm-up Before Lifting": "-Tvd1XFD8gs",
+  "허리 디스크 초기 증상과 자가진단법 총정리": "KJWaq4Euef8",
+  "척추관 협착증 환자를 위한 걷기 운동": "TLevMe2xv2k",
+  "앉아서 일하는 사람 허리 관리법": "33C8ujK5drw",
+  "급성 요통(삐끗) 응급 대처법": "WseZnlwh2YU",
+  "허리 통증 잡는 초간단 스트레칭": "pwoCopzAXLY",
+  "허리 디스크, 수술 없이 재활하기": "wU7ZkcsXMsw",
+  "코어 강화로 허리 보호하기": "q9KWecBByhc",
+  "학생 허리 통증, 자세 교정법": "c8rdV_7xoyQ",
+  "임신부 허리 통증 완화 운동": "3k29gDkCgIY",
+  "어르신 허리 굽음 예방 운동": "tTrxDWMiAco",
+  "Herniated Disc: The BEST Exercises": "cMlxTdqN3OA",
+  "Spinal Stenosis Walking Program": "mWZZHU1pk-8",
+  "Low Back Pain: Quick Relief": "RwOfHZ5pkag",
+  "Core Stability for Your Back": "bQ5a_yaKvJI",
+  "Sciatica Stretch Routine": "8YXglW9kvH4",
+  "무릎 통증, 수술 없이 좋아지는 스트레칭 3가지": "cEvvw99_pbw",
+  "퇴행성 관절염, 무릎 지키는 운동": "JA9HIksZ01c",
+  "반월상 연골 손상 재활 4주 프로그램": "Gu7BriXPWkI",
+  "러닝 후 무릎 통증, 원인은?": "Ly5P34AlsEQ",
+  "계단 오르내릴 때 무릎 아플 때": "Y5vPtmBR5js",
+  "무릎 연골 지키는 근력 운동": "Kz5K0IabjMs",
+  "십자인대 파열 수술 후 재활": "NnoNzrja03k",
+  "무릎 붓기 빠르게 빼는 관리법": "qh33iuCjXEs",
+  "성장기 무릎 통증(오스굿병) 관리": "Dzrqa3FG3JQ",
+  "어르신 인공관절 수술 후 운동": "pgLauJvl15A",
+  "Fix Knee Pain in 5 Minutes (No Equipment)": "OlcRCMpz6GA",
+  "Knee Osteoarthritis Exercises": "sLCahUJl8jk",
+  "Meniscus Tear Rehab Protocol": "t-5g9V426SE",
+  "Runner's Knee: The Real Fix": "bFjLZgFGp_A",
+  "ACL Reconstruction Rehab Guide": "WLrUhc31DGA",
+  "발목 삐끗했을 때 절대 하면 안 되는 것": "btIBD6vhbis",
+  "자주 삐는 발목(불안정성) 강화 운동": "lCWpncjNRcQ",
+  "발목 인대 파열 재활 가이드": "Ky7jQLZBmDI",
+  "아킬레스건염 원인과 관리법": "I3_eSgdAeos",
+  "발목 골절 후 재활 운동 단계별": "NXVlT8Zu21E",
+  "축구·농구 발목 부상 예방법": "0JUt36BoSIc",
+  "발목 붓기 빠르게 빼기": "kMFMMscghco",
+  "만성 발목 통증 셀프 관리": "GrWC9JgnAEE",
+  "발목 근력 밴드 운동 루틴": "9ZcbxhpbhcA",
+  "어르신 발목 근력·낙상 예방 운동": "mvLvxRB8oVU",
+  "How to Heal a Sprained Ankle Fast": "_6hjIWhB8Yc",
+  "Chronic Ankle Instability Exercises": "mr0YhNAc4a8",
+  "Achilles Tendinitis: Full Guide": "IEfyCfCtIJA",
+  "Ankle Sprain Prevention for Athletes": "Y54xXB384mM",
+  "Ankle Mobility Routine (Daily)": "77iX2a1BqOk",
+  "족저근막염 아침 통증 잡는 스트레칭": "Y0cZl1qHfLI",
+  "무지외반증(엄지 튀어나옴) 관리법": "l_Nwoy1U3Hw",
+  "평발 교정 운동과 깔창 고르는 법": "1oLEW1Npko8",
+  "발 아치 무너짐, 셀프 체크법": "RkvtVcfkdVo",
+  "발가락 저림, 원인과 대처법": "hWa_yJbLVQU",
+  "하이힐 자주 신는 사람 발 건강 관리": "iztyW4Dcx0o",
+  "티눈·굳은살 안전하게 관리하기": "lgTpIx6CRuw",
+  "발바닥 통증 부위별 원인 총정리": "2vGtOaxaBv4",
+  "성장기 아이 발 통증 체크리스트": "BumT4RSzqcI",
+  "어르신 발 저림·부종 관리법": "B5Z2wOTBSI4",
+  "Plantar Fasciitis: Morning Pain Fix": "uod-dBB11hs",
+  "Bunion Management Without Surgery": "NrguGSvO3h0",
+  "Flat Feet Correction Exercises": "MHqMLLjmDPI",
+  "Fallen Arches: Self-Check & Fix": "wskTlylWr78",
+  "Foot Numbness: Causes & Fixes": "PQ2WxXhcs6M",
+  "신제품 언박싱 & 첫 사용 후기": "GDIn4qXF_JY",
+  "라이브 커머스 판매 대박 사례 분석": "-0EB2JnnzVA",
+  "제품 비교 리뷰 TOP 5 (구매 가이드)": "BgSXY5jKIl4",
+  "실사용 한 달, 솔직 장단점 후기": "D9jlYYazIyw",
+  "헬스케어 제품 실사용 후기": "zS53OFu51bY",
+  "공동구매 인기 상품 소개 & 시연": "cjduH9BXm4E",
+  "가성비 아이템 추천 모음 (실구매)": "ZRssirZh7JM",
+  "제품 사용법 튜토리얼 (개봉→세팅)": "J_FKrNdwi2s",
+  "구매 전 꼭 봐야 할 단점 리뷰": "ilzgdKoM1Yc",
+  "홈쇼핑 스타일 제품 시연 & 판매": "u6_ovynrHH0",
+  "Product Unboxing & First Impressions": "F1yIklspM9k",
+  "Live Shopping Sales Highlights": "jbi6C-en4Kc",
+  "Honest Product Review (30 Days)": "24W-zI6gbvk",
+  "Top 5 Product Comparison (Buying Guide)": "daF9JE6yQ8w",
+  "How-To Product Tutorial (Setup)": "33bm9ssnuuM",
+  "Best Value Gadgets Roundup": "OpOmfAr9HU8",
+  "릴스로 제품 30초 소개 (전환율 UP)": "Uk7FiUhYp60",
+  "인스타 공동구매 후기 릴스 모음": "E9dlbRsss2k",
+  "제품 언박싱 릴스 (짧고 강하게)": "rPLv2Dvz8sM",
+  "사용 전후 비교 릴스": "wfGWCvKZIvg",
+  "인스타 라이브 쇼핑 하이라이트": "wFtFWiyrZf8",
+  "1분 제품 사용법 릴스": "IepaYr8SEes",
+  "인플루언서 실사용 릴스 (비연예인)": "as3zHoC7AA4",
+  "제품 스타일링 릴스": "3T7-dlzz8rk",
+  "30-Second Product Reel (High Convert)": "LlkpANcY-Qk",
+  "Instagram Live Shopping Highlights": "_VxIcnlVrgE",
+  "Before & After Product Reel": "DidPjY6RWr4",
+  "Unboxing Reels Compilation": "eF0bnHuSAqI",
+  "Influencer Honest Reel (non-celebrity)": "ZlEd32p4lc0",
+};
+
+function ytId(v: { title: string }): string {
+  return YT_IDS[v.title] ?? "";
+}
+
 // ─────────────────── 정형외과: 부위별 카테고리 ───────────────────
 const ORTHO_CATEGORIES: Category[] = [
   {
@@ -418,13 +546,26 @@ export default function Page() {
               onClick={() => setSelected(v)}
               className="group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white transition-shadow hover:shadow-lg dark:border-neutral-800 dark:bg-neutral-950"
             >
-              {/* 썸네일 (그라데이션 대체) */}
+              {/* 썸네일 (실제 영상 썸네일, 없으면 그라데이션) */}
               <div
-                className={`relative flex h-40 items-center justify-center bg-gradient-to-br ${
+                className={`relative flex h-40 items-center justify-center overflow-hidden bg-gradient-to-br ${
                   THUMBS[i % THUMBS.length]
                 }`}
               >
-                <span className="text-4xl text-white/90 transition-transform group-hover:scale-110">
+                {ytId(v) && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={`https://i.ytimg.com/vi/${ytId(v)}/hqdefault.jpg`}
+                    alt={v.title}
+                    loading="lazy"
+                    className="absolute inset-0 h-full w-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display =
+                        "none";
+                    }}
+                  />
+                )}
+                <span className="relative flex h-12 w-12 items-center justify-center rounded-full bg-black/45 text-2xl text-white transition-transform group-hover:scale-110">
                   ▶
                 </span>
                 <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white">
@@ -475,14 +616,27 @@ export default function Page() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="relative bg-black">
-              {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-              <video
-                key={selected.title}
-                src={SAMPLE_VIDEO_URL}
-                controls
-                autoPlay
-                className="aspect-video w-full"
-              />
+              {ytId(selected) ? (
+                <iframe
+                  key={selected.title}
+                  src={`https://www.youtube.com/embed/${ytId(
+                    selected
+                  )}?autoplay=1&rel=0`}
+                  title={selected.title}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                  className="aspect-video w-full"
+                />
+              ) : (
+                // eslint-disable-next-line jsx-a11y/media-has-caption
+                <video
+                  key={selected.title}
+                  src={SAMPLE_VIDEO_URL}
+                  controls
+                  autoPlay
+                  className="aspect-video w-full"
+                />
+              )}
               <button
                 onClick={() => setSelected(null)}
                 aria-label="닫기"
@@ -496,14 +650,14 @@ export default function Page() {
               <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
                 {selected.channel} · {formatViews(selected.views)}
               </p>
-              <p className="mt-2 text-xs text-neutral-400">
-                ※ 샘플 미리보기 영상입니다 (YouTube API 미연동). 실제 영상은 아래
-                버튼으로 확인하세요.
-              </p>
               <a
-                href={`https://www.youtube.com/results?search_query=${encodeURIComponent(
-                  selected.title
-                )}`}
+                href={
+                  ytId(selected)
+                    ? `https://www.youtube.com/watch?v=${ytId(selected)}`
+                    : `https://www.youtube.com/results?search_query=${encodeURIComponent(
+                        selected.title
+                      )}`
+                }
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-3 inline-block rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700"
