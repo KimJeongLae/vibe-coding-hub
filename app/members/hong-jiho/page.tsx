@@ -19,8 +19,14 @@ import MemberShell from "@/components/MemberShell";
 const SLUG = "hong-jiho";
 const STORAGE_KEY = `inventory:${SLUG}`;
 
-// 하루 재고 스냅샷: 날짜 + { 제품명: 재고량 }
-type Snapshot = { date: string; qty: Record<string, number> };
+// 하루 스냅샷: 날짜 + 제품별 현재고(stock) + 제품별 일일 출고량(out)
+//  - stock: '현재재고' 열 (표에 일별로 표시 / 현재고 계산)
+//  - out:   '평균일일배송수량' 등 일일 출고량 (소진 예측 계산에 사용)
+type Snapshot = {
+  date: string;
+  stock: Record<string, number>;
+  out: Record<string, number>;
+};
 
 // ── 헤더 키워드 ─────────────────────────────────────────────
 // 헤더 행을 찾을 때 쓰는 키워드 (열 선택은 아래 score* 함수가 담당)
@@ -251,6 +257,19 @@ function scoreDate(h: string) {
   if (c.includes("date")) return 3;
   return 0;
 }
+// 일일 출고량(소비량) 열 선택. '평균일일배송수량' 을 최우선으로,
+// '배송수량구분' 같은 구분/텍스트 열은 제외.
+function scoreShipped(h: string) {
+  const c = h.trim().toLowerCase().replace(/[\s()]/g, "");
+  if (c.includes("구분")) return 0;
+  if (c.includes("평균") && c.includes("배송")) return 6; // 평균일일배송수량
+  if (c.includes("평균일일")) return 6;
+  if (c === "배송수량" || c === "배송수량전체") return 5;
+  if (c.includes("출고수량") || c.includes("판매수량")) return 5;
+  if (c.includes("배송수량") || c.includes("출고량") || c.includes("판매량")) return 4;
+  if (c.includes("출고") || c.includes("판매")) return 2;
+  return 0;
+}
 
 function buildSnapshots(
   grid: string[][],
@@ -275,6 +294,7 @@ function buildSnapshots(
   let nameIdx = bestColumn(header, scoreName);
   let qtyIdx = bestColumn(header, scoreQty);
   const dateIdx = bestColumn(header, scoreDate);
+  const outIdx = bestColumn(header, scoreShipped); // 일일 출고량 (없으면 -1)
   if (nameIdx === -1) nameIdx = 0;
   if (qtyIdx === -1) qtyIdx = header.length > 1 ? 1 : 0;
 
@@ -293,16 +313,25 @@ function buildSnapshots(
   if (!bannerDate) bannerDate = parseAnyDate(fileName);
 
   const singleDate = bannerDate || fallbackDate;
-  const byDate = new Map<string, Record<string, number>>();
+  const byDate = new Map<
+    string,
+    { stock: Record<string, number>; out: Record<string, number> }
+  >();
   let usedFileDate = false;
+
+  const num = (raw: string) => {
+    const cleaned = (raw ?? "").replace(/[^0-9.-]/g, "");
+    const n = Number(cleaned);
+    return cleaned === "" || !Number.isFinite(n) ? null : n;
+  };
 
   const SKIP_NAMES = ["합계", "총계", "소계", "total", "sum"]; // 요약 행 제외
   for (const r of dataRows) {
     const name = (r[nameIdx] ?? "").trim();
     if (!name || includesAny(name, SKIP_NAMES)) continue;
-    const qtyRaw = (r[qtyIdx] ?? "").replace(/[^0-9.-]/g, "");
-    const qty = Number(qtyRaw);
-    if (qtyRaw === "" || !Number.isFinite(qty)) continue;
+    const stock = num(r[qtyIdx] ?? "");
+    if (stock === null) continue; // 재고량 없는 행은 스킵
+    const out = outIdx >= 0 ? num(r[outIdx] ?? "") : null;
 
     let d = singleDate;
     if (dateIdx >= 0) {
@@ -314,18 +343,24 @@ function buildSnapshots(
     }
     if (!d) return { ok: false, error: "날짜를 찾지 못했습니다. 기준 날짜를 선택해주세요." };
 
-    if (!byDate.has(d)) byDate.set(d, {});
-    byDate.get(d)![name] = qty; // 같은 이름은 마지막 값 사용
+    if (!byDate.has(d)) byDate.set(d, { stock: {}, out: {} });
+    const bucket = byDate.get(d)!;
+    bucket.stock[name] = stock; // 같은 이름은 마지막 값 사용
+    if (out !== null) bucket.out[name] = out;
   }
 
-  const snapshots = Array.from(byDate, ([date, qty]) => ({ date, qty }));
+  const snapshots = Array.from(byDate, ([date, v]) => ({
+    date,
+    stock: v.stock,
+    out: v.out,
+  }));
   if (snapshots.length === 0)
     return {
       ok: false,
       error:
         "제품/재고 데이터를 찾지 못했습니다. 제품명·재고량 열이 있는지 확인해주세요.",
     };
-  const products = new Set(snapshots.flatMap((s) => Object.keys(s.qty))).size;
+  const products = new Set(snapshots.flatMap((s) => Object.keys(s.stock))).size;
   return {
     ok: true,
     snapshots,
@@ -343,38 +378,78 @@ function addDays(date: string, n: number) {
   d.setDate(d.getDate() + n);
   return d.toISOString().slice(0, 10);
 }
+function weekday(dateStr: string) {
+  return new Date(dateStr + "T00:00:00Z").getUTCDay(); // 0=일 … 1=월 … 6=토
+}
+function shiftDate(dateStr: string, delta: number) {
+  const d = new Date(dateStr + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
 type Metric = {
   current: number;
   avgDaily: number | null;
   daysLeft: number | null;
   depletionDate: string | null;
+  basis: "out" | "stock" | null; // 계산 근거
 };
 function computeMetric(product: string, snaps: Snapshot[]): Metric {
-  const points = snaps
-    .filter((s) => s.qty[product] !== undefined)
-    .map((s) => ({ date: s.date, qty: s.qty[product] }))
+  // 현재고 = 가장 최근 날짜의 재고
+  const stockPts = snaps
+    .filter((s) => s.stock[product] !== undefined)
+    .map((s) => ({ date: s.date, v: s.stock[product] }))
     .sort((a, b) => a.date.localeCompare(b.date));
-  const current = points.length ? points[points.length - 1].qty : 0;
-  if (points.length < 2)
-    return { current, avgDaily: null, daysLeft: null, depletionDate: null };
+  const current = stockPts.length ? stockPts[stockPts.length - 1].v : 0;
+  const lastDate = stockPts.length ? stockPts[stockPts.length - 1].date : null;
 
-  // 연속 스냅샷 사이의 "감소분"만 소비로 집계 (재입고 증가분은 제외)
-  let consumed = 0;
-  for (let i = 1; i < points.length; i++) {
-    const diff = points[i - 1].qty - points[i].qty;
-    if (diff > 0) consumed += diff;
+  // 일일 출고량 시계열 (오름차순)
+  const outPts = snaps
+    .filter((s) => s.out[product] !== undefined)
+    .map((s) => ({ date: s.date, v: s.out[product] }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  let avgDaily: number | null = null;
+  let basis: Metric["basis"] = null;
+
+  if (outPts.length >= 1 && outPts.some((p) => p.v > 0)) {
+    // [출고량 기준] 주말(토·일)은 반출이 없으므로,
+    // 월요일 출고량을 토·일·월 3일로 나눠(÷3) 각 날에 배분해 하루 평균을 구함.
+    const adj = new Map<string, number>(outPts.map((p) => [p.date, p.v]));
+    for (const p of outPts) {
+      if (weekday(p.date) === 1) {
+        const share = p.v / 3;
+        adj.set(p.date, share);
+        const sat = shiftDate(p.date, -2);
+        const sun = shiftDate(p.date, -1);
+        if (adj.has(sat)) adj.set(sat, share);
+        if (adj.has(sun)) adj.set(sun, share);
+      }
+    }
+    const vals = Array.from(adj.values());
+    avgDaily = vals.reduce((a, b) => a + b, 0) / vals.length;
+    basis = "out";
+  } else if (stockPts.length >= 2) {
+    // [폴백] 출고 데이터가 없으면 재고 감소분으로 추정 (재입고 증가분 제외)
+    let consumed = 0;
+    for (let i = 1; i < stockPts.length; i++) {
+      const diff = stockPts[i - 1].v - stockPts[i].v;
+      if (diff > 0) consumed += diff;
+    }
+    const span = daysBetween(stockPts[0].date, stockPts[stockPts.length - 1].date);
+    avgDaily = span > 0 ? consumed / span : null;
+    basis = "stock";
   }
-  const span = daysBetween(points[0].date, points[points.length - 1].date);
-  const avgDaily = span > 0 ? consumed / span : null;
+
   if (!avgDaily || avgDaily <= 0)
-    return { current, avgDaily: avgDaily ?? 0, daysLeft: null, depletionDate: null };
+    return { current, avgDaily: avgDaily ?? 0, daysLeft: null, depletionDate: null, basis };
 
   const daysLeft = Math.round(current / avgDaily);
   return {
     current,
     avgDaily,
     daysLeft,
-    depletionDate: addDays(points[points.length - 1].date, daysLeft),
+    depletionDate: lastDate ? addDays(lastDate, daysLeft) : null,
+    basis,
   };
 }
 function statusFor(daysLeft: number | null) {
@@ -411,7 +486,21 @@ export default function Page() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setSnapshots(JSON.parse(raw) as Snapshot[]);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const arr: unknown[] = Array.isArray(parsed) ? parsed : [];
+        // 구버전(qty) 데이터도 stock 으로 이어받도록 변환
+        const migrated: Snapshot[] = arr.map((s) => {
+          const o = s as {
+            date: string;
+            stock?: Record<string, number>;
+            out?: Record<string, number>;
+            qty?: Record<string, number>;
+          };
+          return { date: o.date, stock: o.stock ?? o.qty ?? {}, out: o.out ?? {} };
+        });
+        setSnapshots(migrated);
+      }
     } catch {
       /* 손상된 데이터 무시 */
     }
@@ -431,11 +520,13 @@ export default function Page() {
   const products = useMemo(() => {
     const seen: string[] = [];
     for (const s of sorted)
-      for (const name of Object.keys(s.qty))
+      for (const name of Object.keys(s.stock))
         if (!seen.includes(name)) seen.push(name);
     return seen;
   }, [sorted]);
   const dates = useMemo(() => sorted.map((s) => s.date), [sorted]);
+  // 표시용 날짜: 가장 최근이 왼쪽 (내림차순)
+  const displayDates = useMemo(() => [...dates].reverse(), [dates]);
   const metrics = useMemo(() => {
     const map: Record<string, Metric> = {};
     for (const p of products) map[p] = computeMetric(p, sorted);
@@ -480,13 +571,14 @@ export default function Page() {
 
       if (collected.length > 0) {
         setSnapshots((prev) => {
-          const map = new Map(prev.map((s) => [s.date, s.qty]));
-          for (const s of collected) map.set(s.date, s.qty); // 같은 날짜는 덮어쓰기
-          return Array.from(map, ([d, qty]) => ({ date: d, qty }));
+          const map = new Map(prev.map((s) => [s.date, s]));
+          for (const s of collected) map.set(s.date, s); // 같은 날짜는 덮어쓰기
+          return Array.from(map.values());
         });
         const days = Array.from(new Set(collected.map((s) => s.date))).sort();
-        const productCount = new Set(collected.flatMap((s) => Object.keys(s.qty)))
-          .size;
+        const productCount = new Set(
+          collected.flatMap((s) => Object.keys(s.stock)),
+        ).size;
         if (days.length === 1) setDate(days[0]);
         setNotice(
           `파일 ${files.length - failed.length}개 · 날짜 ${days.length}일 · 제품 ${productCount}개를 불러왔습니다.` +
@@ -604,18 +696,28 @@ export default function Page() {
           </div>
         ) : (
           <div className="overflow-x-auto rounded-2xl border border-neutral-200 shadow-sm dark:border-neutral-800">
-            <table className="w-full border-collapse text-sm">
+            <table className="min-w-full border-collapse text-sm">
               <thead>
                 <tr className="bg-neutral-50 dark:bg-neutral-900">
-                  <th className="sticky left-0 z-10 bg-neutral-50 px-4 py-3 text-left font-semibold dark:bg-neutral-900">
+                  <th className="sticky left-0 z-10 whitespace-nowrap bg-neutral-50 px-4 py-3 text-left font-semibold dark:bg-neutral-900">
                     제품명
                   </th>
-                  <th className="px-4 py-3 text-right font-semibold">현재고</th>
-                  <th className="px-4 py-3 text-right font-semibold">일평균 소진</th>
-                  <th className="px-4 py-3 text-center font-semibold">소진까지</th>
-                  <th className="px-4 py-3 text-center font-semibold">예상 소진일</th>
-                  <th className="px-4 py-3 text-center font-semibold">상태</th>
-                  {dates.map((d) => (
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">
+                    현재고
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">
+                    일평균 소진
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-center font-semibold">
+                    소진까지
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-center font-semibold">
+                    예상 소진일
+                  </th>
+                  <th className="whitespace-nowrap px-4 py-3 text-center font-semibold">
+                    상태
+                  </th>
+                  {displayDates.map((d) => (
                     <th
                       key={d}
                       className="whitespace-nowrap border-l border-neutral-200 px-4 py-3 text-right font-medium text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"
@@ -650,7 +752,7 @@ export default function Page() {
                     >
                       <th
                         scope="row"
-                        className={`sticky left-0 z-10 px-4 py-3 text-left font-medium ${
+                        className={`sticky left-0 z-10 whitespace-nowrap px-4 py-3 text-left font-medium ${
                           zebra
                             ? "bg-neutral-50 dark:bg-neutral-900"
                             : "bg-white dark:bg-neutral-950"
@@ -658,35 +760,35 @@ export default function Page() {
                       >
                         {p}
                       </th>
-                      <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                      <td className="whitespace-nowrap px-4 py-3 text-right font-semibold tabular-nums">
                         {m.current.toLocaleString()}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-neutral-500 dark:text-neutral-400">
+                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums text-neutral-500 dark:text-neutral-400">
                         {m.avgDaily && m.avgDaily > 0 ? m.avgDaily.toFixed(1) : "-"}
                       </td>
-                      <td className="px-4 py-3 text-center tabular-nums">
+                      <td className="whitespace-nowrap px-4 py-3 text-center tabular-nums">
                         {m.daysLeft !== null ? (
                           <span className="font-semibold">{m.daysLeft}일</span>
                         ) : (
                           "-"
                         )}
                       </td>
-                      <td className="px-4 py-3 text-center text-neutral-500 dark:text-neutral-400">
+                      <td className="whitespace-nowrap px-4 py-3 text-center text-neutral-500 dark:text-neutral-400">
                         {m.depletionDate ?? "-"}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <span
-                          className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${s.cls}`}
+                          className={`inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ${s.cls}`}
                         >
                           {s.label}
                         </span>
                       </td>
-                      {dates.map((d) => {
-                        const v = sorted.find((x) => x.date === d)?.qty[p];
+                      {displayDates.map((d) => {
+                        const v = sorted.find((x) => x.date === d)?.stock[p];
                         return (
                           <td
                             key={d}
-                            className="border-l border-neutral-200 px-4 py-3 text-right tabular-nums text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
+                            className="whitespace-nowrap border-l border-neutral-200 px-4 py-3 text-right tabular-nums text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
                           >
                             {v === undefined ? "-" : v.toLocaleString()}
                           </td>
@@ -702,8 +804,10 @@ export default function Page() {
       </section>
 
       <p className="mt-4 text-xs text-neutral-400">
-        * 소진 예측은 기록된 날짜들 사이의 재고 감소량으로 하루 평균 소비를 구해
-        계산합니다. 데이터(날짜)가 많을수록 정확해집니다.
+        * 소진 예측은 <b>일일 출고량(평균일일배송수량)</b>을 기준으로 하루 평균 소진량을
+        구해 계산합니다. 주말(토·일)은 반출이 없으므로 <b>월요일 출고량을 토·일·월 3일로
+        나눠(÷3)</b> 반영합니다. 출고량 데이터가 없으면 재고 감소분으로 추정하며,
+        데이터(날짜)가 많을수록 정확해집니다.
       </p>
     </MemberShell>
   );
