@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import MemberShell from "@/components/MemberShell";
 import {
   MEDIA_DETAILS,
@@ -123,6 +123,28 @@ function scaleM(m: Metrics, factor: number): Metrics {
 }
 const roas = (m: Metrics) => m.revenue / m.cost;
 const ctr = (m: Metrics) => (m.clicks / m.impressions) * 100;
+// 비용 0(브랜드검색 등)일 때 ROAS 무한대 방지
+const roasFmt = (m: Metrics) => (m.cost > 0 ? (m.revenue / m.cost).toFixed(1) + "x" : "—");
+
+// 네이버 실데이터 API 응답 타입
+type NaverResp = {
+  ok: true;
+  since: string;
+  until: string;
+  saTotal: Metrics;
+  campaigns: { id: string; name: string; tp: string; metrics: Metrics }[];
+  groups: { id: string; name: string; type: "SA"; metrics: Metrics }[];
+  keywords: { id: string; keyword: string; group: string; metrics: Metrics }[];
+};
+
+// 선택한 기간 → 실제 날짜(YYYY-MM-DD)로 변환 (네이버 API 조회용)
+function rangeToDates(rangeKey: string, customStart: string, customEnd: string) {
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  if (rangeKey === "custom") return { since: customStart, until: customEnd };
+  const days = RANGES.find((r) => r.key === rangeKey)?.days ?? 7;
+  const now = new Date();
+  return { since: fmt(new Date(now.getTime() - (days - 1) * 86_400_000)), until: fmt(now) };
+}
 
 const TYPE_BADGE: Record<CampaignType, { label: string; color: string }> = {
   SA: { label: "SA", color: "#2a78d6" },
@@ -138,7 +160,10 @@ export default function Page() {
   const [typeFilter, setTypeFilter] = useState<"all" | "image" | "video">("all");
   const [sortKey, setSortKey] = useState("roas");
   const [selectedMedia, setSelectedMedia] = useState<string | null>(null);
-  const [groupSort, setGroupSort] = useState("roas");
+  const [groupSort, setGroupSort] = useState("revenue");
+  const [naver, setNaver] = useState<NaverResp | null>(null);
+  const [naverLoading, setNaverLoading] = useState(true);
+  const [naverError, setNaverError] = useState<string | null>(null);
 
   const group = GROUPS.find((g) => g.id === groupId)!;
   const sort = SORTS.find((s) => s.key === sortKey)!;
@@ -160,7 +185,39 @@ export default function Page() {
   }
   const factor = days / 7;
 
-  const data = MEDIA.map((m) => ({ ...m, ...scaleM(m, factor) }));
+  // 네이버 실데이터 불러오기 (기간이 바뀌면 다시 조회)
+  useEffect(() => {
+    const { since, until } = rangeToDates(rangeKey, customStart, customEnd);
+    let cancelled = false;
+    setNaverLoading(true);
+    setNaverError(null);
+    fetch(`/members/jo-kwonil/api/naver?since=${since}&until=${until}`)
+      .then(async (r) => {
+        const j = await r.json();
+        if (cancelled) return;
+        if (j.ok) setNaver(j as NaverResp);
+        else {
+          setNaver(null);
+          setNaverError(j.error || "네이버 데이터를 불러오지 못했습니다.");
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) setNaverError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setNaverLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rangeKey, customStart, customEnd]);
+
+  const realNaver = naver?.saTotal ?? null;
+
+  // 네이버는 실데이터(기간에 맞춰 API가 반환), 나머지는 샘플을 기간 배율로 스케일
+  const data = MEDIA.map((m) =>
+    m.key === "naver" && realNaver ? { ...m, ...realNaver } : { ...m, ...scaleM(m, factor) },
+  );
 
   const overviewCreatives = OVERVIEW_CREATIVES.map((c) => ({
     ...c,
@@ -278,6 +335,9 @@ export default function Page() {
             gSort={gSort}
             rangeBar={rangeBar}
             onBack={() => setSelectedMedia(null)}
+            real={detail.key === "naver" ? naver : null}
+            loading={detail.key === "naver" && naverLoading}
+            error={detail.key === "naver" ? naverError : null}
           />
         ) : (
           <>
@@ -303,8 +363,15 @@ export default function Page() {
                       <span className="inline-block h-3 w-3 rounded-full" style={{ background: m.color }} />
                       <h3 className="font-semibold">{m.name}</h3>
                     </div>
-                    <span className="text-xs text-neutral-400 transition-colors group-hover:text-blue-500">
-                      자세히 →
+                    <span className="flex items-center gap-1.5">
+                      {m.key === "naver" && realNaver && (
+                        <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/40 dark:text-green-300">
+                          실데이터
+                        </span>
+                      )}
+                      <span className="text-xs text-neutral-400 transition-colors group-hover:text-blue-500">
+                        자세히 →
+                      </span>
                     </span>
                   </div>
                   <dl className="mt-4 space-y-2">
@@ -530,6 +597,9 @@ function DetailView({
   gSort,
   rangeBar,
   onBack,
+  real,
+  loading,
+  error,
 }: {
   detail: NonNullable<ReturnType<typeof getMediaDetail>>;
   factor: number;
@@ -539,16 +609,46 @@ function DetailView({
   gSort: (typeof SORTS)[number];
   rangeBar: React.ReactNode;
   onBack: () => void;
+  real: NaverResp | null;
+  loading: boolean;
+  error: string | null;
 }) {
-  const campaigns = detail.campaigns.map((c) => ({ ...c, metrics: scaleM(c.metrics, factor) }));
-  const groups = detail.groups
-    .map((g) => ({ ...g, metrics: scaleM(g.metrics, factor) }))
+  const isReal = !!real;
+
+  // SA는 실데이터(있으면), DA는 미연동이라 샘플 유지. 나머지 매체는 전체 샘플.
+  const saSample = detail.campaigns.find((c) => c.type === "SA")!;
+  const daSample = detail.campaigns.find((c) => c.type === "DA")!;
+  const campaigns = [
+    {
+      type: "SA" as const,
+      label: isReal ? "SA 캠페인 (검색광고 · 실데이터)" : "SA 캠페인 (검색광고)",
+      metrics: real ? real.saTotal : scaleM(saSample.metrics, factor),
+      note: null as string | null,
+    },
+    {
+      type: "DA" as const,
+      label: "DA 캠페인 (디스플레이)",
+      metrics: scaleM(daSample.metrics, factor),
+      note: isReal ? "GFA 미연동 · 샘플" : null,
+    },
+  ];
+
+  const groupsSrc = real
+    ? real.groups.map((g) => ({ id: g.id, name: g.name, type: g.type, metrics: g.metrics }))
+    : detail.groups.map((g) => ({ id: g.id, name: g.name, type: g.type, metrics: scaleM(g.metrics, factor) }));
+  const groups = [...groupsSrc]
     .sort((a, b) => gSort.calc(b.metrics) - gSort.calc(a.metrics))
     .slice(0, 10);
   const maxGroupVal = Math.max(...groups.map((g) => gSort.calc(g.metrics)), 1);
-  const keywords = detail.keywords
-    .map((k) => ({ ...k, metrics: scaleM(k.metrics, factor) }))
-    .sort((a, b) => roas(b.metrics) - roas(a.metrics));
+
+  const keywordsSrc = real
+    ? real.keywords.map((k) => ({ id: k.id, keyword: k.keyword, group: k.group, metrics: k.metrics }))
+    : detail.keywords.map((k) => ({ ...k, metrics: scaleM(k.metrics, factor) }));
+  const keywords = [...keywordsSrc]
+    .sort((a, b) => b.metrics.revenue - a.metrics.revenue)
+    .slice(0, 8);
+
+  // DA 소재는 항상 샘플 (GFA 미연동)
   const creatives = detail.creatives
     .map((c) => ({ ...c, metrics: scaleM(c.metrics, factor) }))
     .sort((a, b) => roas(b.metrics) - roas(a.metrics));
@@ -563,7 +663,24 @@ function DetailView({
           <span className="inline-block h-4 w-4 rounded-full" style={{ background: detail.color }} />
           <h2 className="text-xl font-bold">{detail.name} 상세 대시보드</h2>
         </div>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">캠페인 · 그룹 · 키워드/소재 성과 (샘플 데이터)</p>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">캠페인 · 그룹 · 키워드/소재 성과</p>
+          {loading && (
+            <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+              네이버 실데이터 불러오는 중…
+            </span>
+          )}
+          {isReal && real && (
+            <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 dark:bg-green-900/40 dark:text-green-300">
+              ● 네이버 실데이터 · {real.since}~{real.until}
+            </span>
+          )}
+          {error && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" title={error}>
+              실데이터 연동 실패 — 샘플 표시
+            </span>
+          )}
+        </div>
         {rangeBar}
       </header>
 
@@ -577,9 +694,14 @@ function DetailView({
                   {TYPE_BADGE[c.type].label}
                 </span>
                 <h3 className="font-semibold">{c.label}</h3>
+                {c.note && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                    {c.note}
+                  </span>
+                )}
               </div>
               <span className="text-sm font-bold" style={{ fontVariantNumeric: "tabular-nums", color: TYPE_BADGE[c.type].color }}>
-                ROAS {roas(c.metrics).toFixed(1)}x
+                ROAS {roasFmt(c.metrics)}
               </span>
             </div>
             <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2">
@@ -601,7 +723,7 @@ function DetailView({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="font-semibold">상위 광고 그룹 (1~10위)</h3>
-            <p className="mt-1 text-xs text-neutral-400">{rangeLabel} · {gSort.label} 기준</p>
+            <p className="mt-1 text-xs text-neutral-400">{rangeLabel} · {gSort.label} 기준{isReal ? " · 실데이터" : ""}</p>
           </div>
           <div className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 p-1 dark:border-neutral-800 dark:bg-neutral-800">
             {SORTS.map((s) => {
@@ -633,7 +755,7 @@ function DetailView({
                     <span className="w-20">매출 {formatCompact(g.metrics.revenue, true)}</span>
                   </div>
                   <span className="w-14 text-right text-sm font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>
-                    {roas(g.metrics).toFixed(1)}x
+                    {roasFmt(g.metrics)}
                   </span>
                 </div>
               </div>
@@ -649,8 +771,11 @@ function DetailView({
           <div className="flex items-center gap-2">
             <span className="rounded-md px-2 py-0.5 text-xs font-bold text-white" style={{ background: TYPE_BADGE.SA.color }}>SA</span>
             <h3 className="font-semibold">고성과 키워드</h3>
+            {isReal && (
+              <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/40 dark:text-green-300">실데이터</span>
+            )}
           </div>
-          <p className="mt-1 text-xs text-neutral-400">검색광고 · ROAS 기준</p>
+          <p className="mt-1 text-xs text-neutral-400">검색광고 · 전환매출 기준</p>
           <ol className="mt-4 space-y-2">
             {keywords.map((k, i) => (
               <li key={k.id} className="flex items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-950">
@@ -659,7 +784,7 @@ function DetailView({
                   <div className="truncate text-sm font-medium">{k.keyword}</div>
                   <div className="text-[11px] text-neutral-400">{k.group} · 클릭 {formatCompact(k.metrics.clicks, false)} · 전환 {formatValue(k.metrics.conversions, false)}</div>
                 </div>
-                <span className="text-sm font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{roas(k.metrics).toFixed(1)}x</span>
+                <span className="text-sm font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{roasFmt(k.metrics)}</span>
               </li>
             ))}
           </ol>
@@ -670,6 +795,9 @@ function DetailView({
           <div className="flex items-center gap-2">
             <span className="rounded-md px-2 py-0.5 text-xs font-bold text-white" style={{ background: TYPE_BADGE.DA.color }}>DA</span>
             <h3 className="font-semibold">고성과 소재</h3>
+            {isReal && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">GFA 미연동 · 샘플</span>
+            )}
           </div>
           <p className="mt-1 text-xs text-neutral-400">디스플레이 · ROAS 기준</p>
           <ol className="mt-4 space-y-2">
@@ -683,7 +811,7 @@ function DetailView({
                     <div className="truncate text-sm font-medium">{c.name}</div>
                     <div className="text-[11px] text-neutral-400">{c.group} · 클릭 {formatCompact(c.metrics.clicks, false)} · 전환 {formatValue(c.metrics.conversions, false)}</div>
                   </div>
-                  <span className="text-sm font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{roas(c.metrics).toFixed(1)}x</span>
+                  <span className="text-sm font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{roasFmt(c.metrics)}</span>
                 </li>
               );
             })}
