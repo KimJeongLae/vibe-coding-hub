@@ -1,218 +1,684 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import MemberShell from "@/components/MemberShell";
 
-// ✏️ "hong-jiho" 님의 페이지 — 내가 만든 작업물을 등록/업로드하는 공간입니다.
-// 등록한 작업물은 이 브라우저에 저장되어 새로고침해도 유지됩니다.
-// (나중에 Supabase 를 연결하면 이 저장 부분만 바꿔서 모두에게 공유할 수 있어요.)
+// 📦 "hong-jiho" 님의 페이지 — 제품별 재고 관리 & 소진 예측 MVP
+//
+// 사용 방법
+//  1) 피디온 관리자에서 재고를 엑셀(.xlsx) 또는 CSV 로 내려받습니다.
+//  2) 아래에 그 파일을 업로드하면,
+//     - 파일 안의 재고량으로 "현재고" 를 맞추고,
+//     - 파일에 적힌 날짜(날짜 열 / 상단 표기 / 파일명)를 인식해 그 날짜 열로 쌓습니다.
+//       (날짜를 못 찾으면 화면에서 고른 "기준 날짜" 를 사용합니다.)
+//  3) 여러 날짜가 쌓이면 하루 평균 소진량으로 "소진까지 며칠" 을 계산해 줍니다.
+//
+//  * 데이터는 이 브라우저(localStorage)에 저장됩니다. (외부 라이브러리/서버 없이 동작)
+//  * 피디온 공식 API 가 확인되면 이 업로드 부분만 API 호출로 바꾸면 됩니다.
 
 const SLUG = "hong-jiho";
-const STORAGE_KEY = `works:${SLUG}`;
+const STORAGE_KEY = `inventory:${SLUG}`;
 
-type Work = {
-  id: string;
-  title: string;
-  category: string;
-  description: string;
-  link: string;
-  createdAt: string;
+// 하루 재고 스냅샷: 날짜 + { 제품명: 재고량 }
+type Snapshot = { date: string; qty: Record<string, number> };
+
+// ── 헤더 키워드 ─────────────────────────────────────────────
+const NAME_KEYS = ["제품", "상품", "품명", "품목", "name", "product"];
+const QTY_KEYS = ["재고", "수량", "현재고", "잔량", "stock", "qty"];
+const DATE_KEYS = ["날짜", "일자", "기준일", "date"];
+
+// ── CSV 파싱 (따옴표/줄바꿈 처리) ─────────────────────────────
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  const src = text.replace(/^﻿/, ""); // BOM 제거
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (src[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else inQuotes = false;
+      } else field += c;
+      continue;
+    }
+    if (c === '"') inQuotes = true;
+    else if (c === ",") {
+      row.push(field);
+      field = "";
+    } else if (c === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (c !== "\r") field += c;
+  }
+  row.push(field);
+  rows.push(row);
+  return rows;
+}
+
+// UTF-8 로 먼저 읽고, 깨지면(한글 CMS 는 EUC-KR 인 경우가 많음) EUC-KR 로 재시도
+async function readTextSmart(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  let text = new TextDecoder("utf-8").decode(buf);
+  if (text.includes("�")) {
+    try {
+      text = new TextDecoder("euc-kr").decode(buf);
+    } catch {
+      /* euc-kr 미지원이면 utf-8 유지 */
+    }
+  }
+  return text;
+}
+
+// ── 최소 XLSX(zip) 리더 — 외부 라이브러리 없이 브라우저 내장 기능만 사용 ──
+function u16(b: Uint8Array, o: number) {
+  return b[o] | (b[o + 1] << 8);
+}
+function u32(b: Uint8Array, o: number) {
+  return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
+}
+async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
+  const ds = new DecompressionStream("deflate-raw");
+  const copy = new Uint8Array(data.byteLength); // ArrayBuffer 기반으로 복사 (BlobPart 타입 충족)
+  copy.set(data);
+  const stream = new Blob([copy]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function unzip(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
+  // End Of Central Directory 찾기
+  let eocd = -1;
+  const min = Math.max(0, bytes.length - 22 - 65536);
+  for (let i = bytes.length - 22; i >= min; i--) {
+    if (u32(bytes, i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("올바른 xlsx(zip) 파일이 아닙니다.");
+  const count = u16(bytes, eocd + 10);
+  let off = u32(bytes, eocd + 16);
+  const out = new Map<string, Uint8Array>();
+  for (let n = 0; n < count && u32(bytes, off) === 0x02014b50; n++) {
+    const method = u16(bytes, off + 10);
+    const compSize = u32(bytes, off + 20);
+    const nameLen = u16(bytes, off + 28);
+    const extraLen = u16(bytes, off + 30);
+    const commentLen = u16(bytes, off + 32);
+    const localOff = u32(bytes, off + 42);
+    const name = new TextDecoder().decode(
+      bytes.subarray(off + 46, off + 46 + nameLen),
+    );
+    const lNameLen = u16(bytes, localOff + 26);
+    const lExtraLen = u16(bytes, localOff + 28);
+    const dataStart = localOff + 30 + lNameLen + lExtraLen;
+    const comp = bytes.subarray(dataStart, dataStart + compSize);
+    if (method === 0) out.set(name, comp);
+    else if (method === 8) out.set(name, await inflateRaw(comp));
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+}
+function colToIndex(ref: string): number {
+  const m = ref.match(/^([A-Z]+)/);
+  let idx = 0;
+  if (m) for (const ch of m[1]) idx = idx * 26 + (ch.charCodeAt(0) - 64);
+  return idx - 1;
+}
+function parseSharedStrings(xml: string): string[] {
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  return Array.from(doc.getElementsByTagName("si")).map((si) =>
+    Array.from(si.getElementsByTagName("t"))
+      .map((t) => t.textContent ?? "")
+      .join(""),
+  );
+}
+function parseSheet(xml: string, shared: string[]): string[][] {
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  const grid: string[][] = [];
+  for (const rowEl of Array.from(doc.getElementsByTagName("row"))) {
+    const row: string[] = [];
+    for (const c of Array.from(rowEl.getElementsByTagName("c"))) {
+      const ci = colToIndex(c.getAttribute("r") ?? "");
+      const t = c.getAttribute("t");
+      let val = "";
+      if (t === "s") {
+        const i = Number(c.getElementsByTagName("v")[0]?.textContent);
+        val = Number.isFinite(i) ? (shared[i] ?? "") : "";
+      } else if (t === "inlineStr" || t === "str") {
+        val = Array.from(c.getElementsByTagName("t"))
+          .map((x) => x.textContent ?? "")
+          .join("");
+      } else {
+        val = c.getElementsByTagName("v")[0]?.textContent ?? "";
+      }
+      if (ci >= 0) row[ci] = val;
+    }
+    for (let i = 0; i < row.length; i++) if (row[i] === undefined) row[i] = "";
+    grid.push(row);
+  }
+  return grid;
+}
+async function parseXlsx(file: File): Promise<string[][]> {
+  if (typeof DecompressionStream === "undefined")
+    throw new Error(
+      "이 브라우저는 xlsx 자동 변환을 지원하지 않습니다. CSV 로 저장해서 올려주세요.",
+    );
+  const files = await unzip(new Uint8Array(await file.arrayBuffer()));
+  const dec = new TextDecoder("utf-8");
+  const sharedBuf = files.get("xl/sharedStrings.xml");
+  const shared = sharedBuf ? parseSharedStrings(dec.decode(sharedBuf)) : [];
+  let sheetKey = "xl/worksheets/sheet1.xml";
+  if (!files.has(sheetKey)) {
+    const cand = Array.from(files.keys())
+      .filter((k) => /^xl\/worksheets\/sheet.*\.xml$/.test(k))
+      .sort()[0];
+    if (cand) sheetKey = cand;
+  }
+  const sheetBuf = files.get(sheetKey);
+  if (!sheetBuf) throw new Error("엑셀에서 워크시트를 찾지 못했습니다.");
+  return parseSheet(dec.decode(sheetBuf), shared);
+}
+
+// ── 날짜 파싱 (문자열 / 엑셀 시리얼 숫자 모두) ─────────────────
+function pad(n: string | number) {
+  return String(n).padStart(2, "0");
+}
+function parseAnyDate(v: string): string | null {
+  const s = (v ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/(\d{4})[.\-/년\s]+(\d{1,2})[.\-/월\s]+(\d{1,2})/);
+  if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (n > 20000 && n < 80000) {
+      // 엑셀 날짜 시리얼(1899-12-30 기준)
+      return new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
+    }
+  }
+  return null;
+}
+
+// ── 표 → 스냅샷 변환 (헤더/열/날짜 자동 감지) ────────────────
+type BuildResult =
+  | { ok: true; snapshots: Snapshot[]; products: number; dateFromFile: boolean }
+  | { ok: false; error: string };
+
+function includesAny(cell: string, keys: string[]) {
+  const c = cell.trim().toLowerCase();
+  return keys.some((k) => c.includes(k.toLowerCase()));
+}
+
+function buildSnapshots(
+  grid: string[][],
+  fallbackDate: string,
+  fileName: string,
+): BuildResult {
+  const rows = grid.filter((r) => r.some((c) => (c ?? "").trim() !== ""));
+  if (rows.length === 0) return { ok: false, error: "파일이 비어 있습니다." };
+
+  // 헤더 행 찾기 (앞쪽 20줄 안에서 키워드가 있는 첫 줄)
+  let headerRow = -1;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    if (rows[i].some((c) => includesAny(c, [...NAME_KEYS, ...QTY_KEYS]))) {
+      headerRow = i;
+      break;
+    }
+  }
+  const header = headerRow >= 0 ? rows[headerRow] : rows[0];
+  const dataRows = headerRow >= 0 ? rows.slice(headerRow + 1) : rows;
+  const aboveRows = headerRow >= 0 ? rows.slice(0, headerRow) : [];
+
+  let nameIdx = header.findIndex((c) => includesAny(c, NAME_KEYS));
+  let qtyIdx = header.findIndex((c) => includesAny(c, QTY_KEYS));
+  const dateIdx = header.findIndex((c) => includesAny(c, DATE_KEYS));
+  if (nameIdx === -1) nameIdx = 0;
+  if (qtyIdx === -1) qtyIdx = header.length > 1 ? 1 : 0;
+
+  // 파일에서 날짜 힌트 찾기 (헤더 위쪽 셀들 → 파일명)
+  let bannerDate: string | null = null;
+  for (const r of [...aboveRows, header]) {
+    for (const cell of r) {
+      const d = parseAnyDate(cell);
+      if (d) {
+        bannerDate = d;
+        break;
+      }
+    }
+    if (bannerDate) break;
+  }
+  if (!bannerDate) bannerDate = parseAnyDate(fileName);
+
+  const singleDate = bannerDate || fallbackDate;
+  const byDate = new Map<string, Record<string, number>>();
+  let usedFileDate = false;
+
+  const SKIP_NAMES = ["합계", "총계", "소계", "total", "sum"]; // 요약 행 제외
+  for (const r of dataRows) {
+    const name = (r[nameIdx] ?? "").trim();
+    if (!name || includesAny(name, SKIP_NAMES)) continue;
+    const qtyRaw = (r[qtyIdx] ?? "").replace(/[^0-9.-]/g, "");
+    const qty = Number(qtyRaw);
+    if (qtyRaw === "" || !Number.isFinite(qty)) continue;
+
+    let d = singleDate;
+    if (dateIdx >= 0) {
+      const pd = parseAnyDate(r[dateIdx] ?? "");
+      if (pd) {
+        d = pd;
+        usedFileDate = true;
+      }
+    }
+    if (!d) return { ok: false, error: "날짜를 찾지 못했습니다. 기준 날짜를 선택해주세요." };
+
+    if (!byDate.has(d)) byDate.set(d, {});
+    byDate.get(d)![name] = qty; // 같은 이름은 마지막 값 사용
+  }
+
+  const snapshots = Array.from(byDate, ([date, qty]) => ({ date, qty }));
+  if (snapshots.length === 0)
+    return {
+      ok: false,
+      error:
+        "제품/재고 데이터를 찾지 못했습니다. 제품명·재고량 열이 있는지 확인해주세요.",
+    };
+  const products = new Set(snapshots.flatMap((s) => Object.keys(s.qty))).size;
+  return {
+    ok: true,
+    snapshots,
+    products,
+    dateFromFile: usedFileDate || bannerDate !== null,
+  };
+}
+
+// ── 소진 지표 계산 ─────────────────────────────────────────
+function daysBetween(a: string, b: string) {
+  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86_400_000);
+}
+function addDays(date: string, n: number) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+type Metric = {
+  current: number;
+  avgDaily: number | null;
+  daysLeft: number | null;
+  depletionDate: string | null;
 };
+function computeMetric(product: string, snaps: Snapshot[]): Metric {
+  const points = snaps
+    .filter((s) => s.qty[product] !== undefined)
+    .map((s) => ({ date: s.date, qty: s.qty[product] }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const current = points.length ? points[points.length - 1].qty : 0;
+  if (points.length < 2)
+    return { current, avgDaily: null, daysLeft: null, depletionDate: null };
 
-const CATEGORIES = ["웹", "앱", "디자인", "문서", "기타"] as const;
+  // 연속 스냅샷 사이의 "감소분"만 소비로 집계 (재입고 증가분은 제외)
+  let consumed = 0;
+  for (let i = 1; i < points.length; i++) {
+    const diff = points[i - 1].qty - points[i].qty;
+    if (diff > 0) consumed += diff;
+  }
+  const span = daysBetween(points[0].date, points[points.length - 1].date);
+  const avgDaily = span > 0 ? consumed / span : null;
+  if (!avgDaily || avgDaily <= 0)
+    return { current, avgDaily: avgDaily ?? 0, daysLeft: null, depletionDate: null };
+
+  const daysLeft = Math.round(current / avgDaily);
+  return {
+    current,
+    avgDaily,
+    daysLeft,
+    depletionDate: addDays(points[points.length - 1].date, daysLeft),
+  };
+}
+function statusFor(daysLeft: number | null) {
+  if (daysLeft === null)
+    return {
+      label: "데이터 부족",
+      cls: "bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400",
+    };
+  if (daysLeft <= 7)
+    return {
+      label: "소진 임박",
+      cls: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+    };
+  if (daysLeft <= 14)
+    return {
+      label: "주의",
+      cls: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
+    };
+  return {
+    label: "여유",
+    cls: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300",
+  };
+}
 
 export default function Page() {
-  const [works, setWorks] = useState<Work[]>([]);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [date, setDate] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<string>(CATEGORIES[0]);
-  const [description, setDescription] = useState("");
-  const [link, setLink] = useState("");
-
-  // 저장된 작업물 불러오기
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setWorks(JSON.parse(raw) as Work[]);
+      if (raw) setSnapshots(JSON.parse(raw) as Snapshot[]);
     } catch {
-      // 저장된 데이터가 손상된 경우 무시
+      /* 손상된 데이터 무시 */
     }
+    setDate(new Date().toISOString().slice(0, 10));
     setLoaded(true);
   }, []);
 
-  // 작업물이 바뀔 때마다 저장 (첫 로드 이후에만)
   useEffect(() => {
     if (!loaded) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(works));
-  }, [works, loaded]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshots));
+  }, [snapshots, loaded]);
 
-  function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = title.trim();
-    if (!trimmed) return;
+  const sorted = useMemo(
+    () => [...snapshots].sort((a, b) => a.date.localeCompare(b.date)),
+    [snapshots],
+  );
+  const products = useMemo(() => {
+    const seen: string[] = [];
+    for (const s of sorted)
+      for (const name of Object.keys(s.qty))
+        if (!seen.includes(name)) seen.push(name);
+    return seen;
+  }, [sorted]);
+  const dates = useMemo(() => sorted.map((s) => s.date), [sorted]);
+  const metrics = useMemo(() => {
+    const map: Record<string, Metric> = {};
+    for (const p of products) map[p] = computeMetric(p, sorted);
+    return map;
+  }, [products, sorted]);
 
-    const newWork: Work = {
-      id: crypto.randomUUID(),
-      title: trimmed,
-      category,
-      description: description.trim(),
-      link: link.trim(),
-      createdAt: new Date().toISOString(),
-    };
+  const urgentCount = products.filter(
+    (p) => metrics[p].daysLeft !== null && metrics[p].daysLeft! <= 7,
+  ).length;
+  const latestDate = dates.length ? dates[dates.length - 1] : "-";
 
-    setWorks((prev) => [newWork, ...prev]);
-    setTitle("");
-    setCategory(CATEGORIES[0]);
-    setDescription("");
-    setLink("");
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    setError("");
+    setNotice("");
+    if (!file) return;
+    setBusy(true);
+    try {
+      const isCsv = /\.csv$/i.test(file.name);
+      const grid = isCsv
+        ? parseCSV(await readTextSmart(file))
+        : await parseXlsx(file);
+      const result = buildSnapshots(grid, date, file.name);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setSnapshots((prev) => {
+        const map = new Map(prev.map((s) => [s.date, s.qty]));
+        for (const s of result.snapshots) map.set(s.date, s.qty); // 같은 날짜 덮어쓰기
+        return Array.from(map, ([d, qty]) => ({ date: d, qty }));
+      });
+      const dayList = result.snapshots.map((s) => s.date).sort();
+      if (dayList.length === 1) setDate(dayList[0]);
+      setNotice(
+        `${dayList[0]}${dayList.length > 1 ? ` 외 ${dayList.length - 1}일` : ""} · 제품 ${
+          result.products
+        }개를 불러왔습니다. ${
+          result.dateFromFile ? "(파일에서 날짜 인식)" : "(선택한 기준 날짜 사용)"
+        }`,
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "파일을 읽는 중 오류가 발생했습니다.",
+      );
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
   }
 
-  function handleDelete(id: string) {
-    setWorks((prev) => prev.filter((w) => w.id !== id));
+  function removeDate(d: string) {
+    setSnapshots((prev) => prev.filter((s) => s.date !== d));
+  }
+  function resetAll() {
+    setSnapshots([]);
+    setNotice("");
+    setError("");
   }
 
   return (
     <MemberShell slug={SLUG}>
-      {/* 작업물 등록 폼 */}
-      <section className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-950">
-        <h2 className="text-lg font-semibold">➕ 새 작업물 등록</h2>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-          내가 만든 작업물의 정보를 입력하고 등록해보세요.
-        </p>
-
-        <form onSubmit={handleAdd} className="mt-5 grid gap-4">
-          <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
-            <label className="grid gap-1.5">
-              <span className="text-sm font-medium">제목 *</span>
-              <input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="예) 나만의 포트폴리오 사이트"
-                className="rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none transition-colors focus:border-blue-500 dark:border-neutral-700"
-                required
-              />
-            </label>
-
-            <label className="grid gap-1.5">
-              <span className="text-sm font-medium">분류</span>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none transition-colors focus:border-blue-500 dark:border-neutral-700"
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c} className="text-black">
-                    {c}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <label className="grid gap-1.5">
-            <span className="text-sm font-medium">설명</span>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="어떤 작업물인지 간단히 적어주세요."
-              rows={3}
-              className="resize-y rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none transition-colors focus:border-blue-500 dark:border-neutral-700"
-            />
-          </label>
-
-          <label className="grid gap-1.5">
-            <span className="text-sm font-medium">링크 (선택)</span>
-            <input
-              type="url"
-              value={link}
-              onChange={(e) => setLink(e.target.value)}
-              placeholder="https://..."
-              className="rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none transition-colors focus:border-blue-500 dark:border-neutral-700"
-            />
-          </label>
-
-          <div>
-            <button
-              type="submit"
-              className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:opacity-40"
-              disabled={!title.trim()}
-            >
-              등록하기
-            </button>
-          </div>
-        </form>
+      {/* 요약 카드 */}
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <SummaryCard label="관리 제품" value={`${products.length}`} unit="개" />
+        <SummaryCard
+          label="소진 임박(≤7일)"
+          value={`${urgentCount}`}
+          unit="개"
+          accent={urgentCount > 0 ? "danger" : "ok"}
+        />
+        <SummaryCard label="기록된 날짜" value={`${dates.length}`} unit="일" />
+        <SummaryCard label="데이터 기준일" value={latestDate} />
       </section>
 
-      {/* 등록된 작업물 목록 */}
-      <section className="mt-8">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">
-            📦 내 작업물
-            <span className="ml-2 text-sm font-normal text-neutral-400">
-              {works.length}개
+      {/* 업로드 툴바 */}
+      <section className="mt-6 rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm dark:border-neutral-800 dark:bg-neutral-950">
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="grid gap-1.5">
+            <span className="text-sm font-medium">
+              재고 파일 업로드{" "}
+              <span className="font-normal text-neutral-400">(.xlsx / .csv)</span>
             </span>
-          </h2>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              disabled={busy}
+              onChange={handleFile}
+              className="text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-blue-700 disabled:opacity-50"
+            />
+          </label>
+
+          <label className="grid gap-1.5">
+            <span className="text-sm font-medium">
+              기준 날짜{" "}
+              <span className="font-normal text-neutral-400">
+                (파일에 날짜가 없을 때)
+              </span>
+            </span>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="rounded-lg border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-500 dark:border-neutral-700"
+            />
+          </label>
+
+          {snapshots.length > 0 && (
+            <button
+              onClick={resetAll}
+              className="ml-auto rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950"
+            >
+              전체 초기화
+            </button>
+          )}
         </div>
 
-        {works.length === 0 ? (
+        {busy && (
+          <p className="mt-3 text-sm text-neutral-500">파일을 분석하는 중…</p>
+        )}
+        {error && (
+          <p className="mt-3 text-sm text-red-600 dark:text-red-400">⚠️ {error}</p>
+        )}
+        {notice && (
+          <p className="mt-3 text-sm text-emerald-600 dark:text-emerald-400">
+            ✅ {notice}
+          </p>
+        )}
+        <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
+          피디온에서 받은 재고 파일을 그대로 올리세요. <b>제품명·재고량</b> 열을
+          자동으로 찾고, 파일에 적힌 <b>날짜</b>로 그날의 열을 쌓습니다. 같은 날짜를
+          다시 올리면 덮어씁니다.
+        </p>
+      </section>
+
+      {/* 재고 표 */}
+      <section className="mt-6">
+        {products.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-neutral-300 bg-neutral-50 p-10 text-center dark:border-neutral-700 dark:bg-neutral-900">
-            <div className="text-4xl">🗂️</div>
+            <div className="text-4xl">📦</div>
             <p className="mt-3 text-sm text-neutral-500 dark:text-neutral-400">
-              아직 등록한 작업물이 없어요. 위에서 첫 작업물을 등록해보세요!
+              아직 데이터가 없어요. 위에서 재고 엑셀/CSV 를 업로드해보세요.
+              <br />
+              여러 날짜를 쌓으면 <b>소진까지 남은 일수</b>가 자동 계산됩니다.
             </p>
           </div>
         ) : (
-          <ul className="grid gap-4 sm:grid-cols-2">
-            {works.map((work) => (
-              <li
-                key={work.id}
-                className="flex flex-col rounded-2xl border border-neutral-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-neutral-800 dark:bg-neutral-950"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className="inline-block rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-600 dark:bg-blue-950 dark:text-blue-300">
-                      {work.category}
-                    </span>
-                    <h3 className="mt-2 truncate text-base font-semibold">
-                      {work.title}
-                    </h3>
-                  </div>
-                  <button
-                    onClick={() => handleDelete(work.id)}
-                    aria-label="삭제"
-                    className="shrink-0 rounded-md px-2 py-1 text-sm text-neutral-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {work.description && (
-                  <p className="mt-2 whitespace-pre-wrap text-sm text-neutral-600 dark:text-neutral-300">
-                    {work.description}
-                  </p>
-                )}
-
-                {work.link && (
-                  <a
-                    href={work.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-3 inline-block truncate text-sm text-blue-600 hover:underline"
-                  >
-                    🔗 {work.link}
-                  </a>
-                )}
-
-                <time className="mt-auto pt-3 text-xs text-neutral-400">
-                  {new Date(work.createdAt).toLocaleDateString("ko-KR")}
-                </time>
-              </li>
-            ))}
-          </ul>
+          <div className="overflow-x-auto rounded-2xl border border-neutral-200 shadow-sm dark:border-neutral-800">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-neutral-50 dark:bg-neutral-900">
+                  <th className="sticky left-0 z-10 bg-neutral-50 px-4 py-3 text-left font-semibold dark:bg-neutral-900">
+                    제품명
+                  </th>
+                  <th className="px-4 py-3 text-right font-semibold">현재고</th>
+                  <th className="px-4 py-3 text-right font-semibold">일평균 소진</th>
+                  <th className="px-4 py-3 text-center font-semibold">소진까지</th>
+                  <th className="px-4 py-3 text-center font-semibold">예상 소진일</th>
+                  <th className="px-4 py-3 text-center font-semibold">상태</th>
+                  {dates.map((d) => (
+                    <th
+                      key={d}
+                      className="whitespace-nowrap border-l border-neutral-200 px-4 py-3 text-right font-medium text-neutral-500 dark:border-neutral-800 dark:text-neutral-400"
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        {d.slice(5)}
+                        <button
+                          onClick={() => removeDate(d)}
+                          aria-label={`${d} 열 삭제`}
+                          className="text-neutral-300 hover:text-red-500"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {products.map((p, idx) => {
+                  const m = metrics[p];
+                  const s = statusFor(m.daysLeft);
+                  const zebra = idx % 2 === 1;
+                  return (
+                    <tr
+                      key={p}
+                      className={
+                        zebra
+                          ? "bg-neutral-50/50 dark:bg-neutral-900/40"
+                          : "bg-white dark:bg-neutral-950"
+                      }
+                    >
+                      <th
+                        scope="row"
+                        className={`sticky left-0 z-10 px-4 py-3 text-left font-medium ${
+                          zebra
+                            ? "bg-neutral-50 dark:bg-neutral-900"
+                            : "bg-white dark:bg-neutral-950"
+                        }`}
+                      >
+                        {p}
+                      </th>
+                      <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                        {m.current.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-neutral-500 dark:text-neutral-400">
+                        {m.avgDaily && m.avgDaily > 0 ? m.avgDaily.toFixed(1) : "-"}
+                      </td>
+                      <td className="px-4 py-3 text-center tabular-nums">
+                        {m.daysLeft !== null ? (
+                          <span className="font-semibold">{m.daysLeft}일</span>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center text-neutral-500 dark:text-neutral-400">
+                        {m.depletionDate ?? "-"}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span
+                          className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${s.cls}`}
+                        >
+                          {s.label}
+                        </span>
+                      </td>
+                      {dates.map((d) => {
+                        const v = sorted.find((x) => x.date === d)?.qty[p];
+                        return (
+                          <td
+                            key={d}
+                            className="border-l border-neutral-200 px-4 py-3 text-right tabular-nums text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
+                          >
+                            {v === undefined ? "-" : v.toLocaleString()}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
+
+      <p className="mt-4 text-xs text-neutral-400">
+        * 소진 예측은 기록된 날짜들 사이의 재고 감소량으로 하루 평균 소비를 구해
+        계산합니다. 데이터(날짜)가 많을수록 정확해집니다.
+      </p>
     </MemberShell>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  unit,
+  accent = "default",
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  accent?: "default" | "ok" | "danger";
+}) {
+  const valueCls =
+    accent === "danger"
+      ? "text-red-600 dark:text-red-400"
+      : accent === "ok"
+        ? "text-emerald-600 dark:text-emerald-400"
+        : "";
+  return (
+    <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-950">
+      <div className="text-xs text-neutral-500 dark:text-neutral-400">{label}</div>
+      <div className={`mt-1 text-2xl font-bold tabular-nums ${valueCls}`}>
+        {value}
+        {unit && (
+          <span className="ml-1 text-sm font-normal text-neutral-400">{unit}</span>
+        )}
+      </div>
+    </div>
   );
 }
