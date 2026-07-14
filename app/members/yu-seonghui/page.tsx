@@ -9,49 +9,63 @@ import MemberShell from "@/components/MemberShell";
 // - 실제 AI 연동/문서 학습은 하지 않습니다. 아래 DICTIONARY 에 정의된 약어만 정해진 답변을 내보냅니다.
 // - 새 약어를 추가하려면 DICTIONARY 에 항목을 하나 더 넣으면 됩니다.
 
-type Entry = { full: string; ko: string; desc: string };
+// aliases: 이 표현들 중 아무거나 입력해도 같은 답이 나옵니다 (약어·한글 뜻·풀네임 등)
+type Entry = { full: string; ko: string; desc: string; aliases: string[] };
 
 const DICTIONARY: Record<string, Entry> = {
   NPO: {
     full: "Nil Per Os (라틴어)",
     ko: "금식",
     desc: "수술·검사 등을 위해 입으로 음식과 물을 포함해 아무것도 섭취하지 않는 상태예요.",
+    aliases: ["NPO", "금식", "Nil Per Os"],
   },
   PRN: {
     full: "Pro Re Nata (라틴어)",
     ko: "필요시 투여",
     desc: "정해진 시간이 아니라, 환자에게 필요할 때마다 투여하라는 처방이에요. (예: 통증 있을 때)",
+    aliases: ["PRN", "필요시 투여", "필요시", "Pro Re Nata"],
   },
   BID: {
     full: "Bis In Die (라틴어)",
     ko: "하루 2회",
     desc: "약을 하루에 두 번 투여한다는 뜻이에요. (보통 아침·저녁)",
+    aliases: ["BID", "하루 2회", "하루2회", "하루 두 번", "Bis In Die"],
   },
   IV: {
     full: "Intravenous",
     ko: "정맥 주사",
     desc: "약물이나 수액을 정맥으로 직접 주입하는 방법이에요.",
+    aliases: ["IV", "정맥 주사", "정맥주사", "Intravenous"],
   },
   "V/S": {
     full: "Vital Signs",
     ko: "활력징후",
     desc: "환자의 기본 생체 신호로 혈압·맥박·호흡·체온을 말해요.",
+    aliases: ["V/S", "VS", "활력징후", "바이탈", "Vital Signs", "Vital Sign"],
   },
   STAT: {
     full: "Statim (라틴어)",
     ko: "즉시",
     desc: "지시를 지체 없이 즉시 시행하라는 뜻이에요. (응급 상황에서 자주 사용)",
+    aliases: ["STAT", "즉시", "Statim"],
   },
 };
 
 type Msg = { who: "bot" | "user"; text: string };
 
-// 입력에서 등록된 약어 찾기 (대소문자·점·공백 무시)
+// 입력을 정규화 (대소문자·점·공백·슬래시 무시)
+function normalize(s: string): string {
+  return s.toUpperCase().replace(/[.\s/]/g, "");
+}
+
+// 입력에서 등록된 용어 찾기 — 약어/한글 뜻/풀네임(별칭) 중 무엇을 쳐도 매칭
 function findAbbrev(text: string): string | null {
-  const norm = text.toUpperCase().replace(/[.\s]/g, "");
+  const norm = normalize(text);
+  if (!norm) return null;
   for (const key of Object.keys(DICTIONARY)) {
-    const keyNorm = key.replace(/[.\s]/g, "");
-    if (norm.includes(keyNorm)) return key;
+    for (const alias of DICTIONARY[key].aliases) {
+      if (norm.includes(normalize(alias))) return key;
+    }
   }
   return null;
 }
@@ -68,7 +82,7 @@ export default function Page() {
   const [messages, setMessages] = useState<Msg[]>([
     {
       who: "bot",
-      text: "안녕하세요! 간호 약어 도우미예요. 🩺\n아래 약어를 누르거나 직접 입력해서 물어보세요.",
+      text: "안녕하세요! 간호 약어 도우미예요. 🩺\n아래 약어를 누르거나, 약어·한글 뜻(예: 금식, 활력징후) 무엇이든 입력해서 물어보세요.",
     },
   ]);
   const [input, setInput] = useState("");
