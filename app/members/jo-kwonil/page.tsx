@@ -125,6 +125,13 @@ const roas = (m: Metrics) => m.revenue / m.cost;
 const ctr = (m: Metrics) => (m.clicks / m.impressions) * 100;
 // 비용 0(브랜드검색 등)일 때 ROAS 무한대 방지
 const roasFmt = (m: Metrics) => (m.cost > 0 ? (m.revenue / m.cost).toFixed(1) + "x" : "—");
+// CPC(클릭당 비용) / CTR — 분모 0 방지
+const cpcFmt = (m: Metrics) =>
+  m.clicks > 0 ? "₩" + Math.round(m.cost / m.clicks).toLocaleString("ko-KR") : "—";
+const ctrFmt = (m: Metrics) =>
+  m.impressions > 0 ? ((m.clicks / m.impressions) * 100).toFixed(2) + "%" : "—";
+// 성과 저조(낭비) 판정: 비용은 썼는데 매출이 0이거나 비용보다 적음(ROAS<1)
+const isWasteful = (m: Metrics) => m.cost > 0 && (m.revenue === 0 || m.revenue < m.cost);
 
 // 네이버 실데이터 API 응답 타입
 type NaverResp = {
@@ -614,6 +621,8 @@ function DetailView({
   error: string | null;
 }) {
   const isReal = !!real;
+  // 상위 그룹 SA/DA 필터 (뷰 전환은 클라이언트 상태로만 → 즉시 반응)
+  const [gTypeFilter, setGTypeFilter] = useState<"all" | "SA" | "DA">("all");
 
   // SA는 실데이터(있으면), DA는 미연동이라 샘플 유지. 나머지 매체는 전체 샘플.
   const saSample = detail.campaigns.find((c) => c.type === "SA")!;
@@ -634,9 +643,11 @@ function DetailView({
   ];
 
   const groupsSrc = real
-    ? real.groups.map((g) => ({ id: g.id, name: g.name, type: g.type, metrics: g.metrics }))
+    ? real.groups.map((g) => ({ id: g.id, name: g.name, type: g.type as CampaignType, metrics: g.metrics }))
     : detail.groups.map((g) => ({ id: g.id, name: g.name, type: g.type, metrics: scaleM(g.metrics, factor) }));
-  const groups = [...groupsSrc]
+  const groupsFiltered =
+    gTypeFilter === "all" ? groupsSrc : groupsSrc.filter((g) => g.type === gTypeFilter);
+  const groups = [...groupsFiltered]
     .sort((a, b) => gSort.calc(b.metrics) - gSort.calc(a.metrics))
     .slice(0, 10);
   const maxGroupVal = Math.max(...groups.map((g) => gSort.calc(g.metrics)), 1);
@@ -653,8 +664,23 @@ function DetailView({
     .map((c) => ({ ...c, metrics: scaleM(c.metrics, factor) }))
     .sort((a, b) => roas(b.metrics) - roas(a.metrics));
 
+  // ⚠️ 긴급 알럿: 비용은 썼는데 매출이 없거나 비용보다 적은(ROAS<1) 그룹·키워드
+  // (전체 데이터에서 계산 → 상위 랭킹 밖에 숨은 낭비까지 잡아냄, 낭비 비용 큰 순)
+  const wasteScore = (m: Metrics) => m.cost - m.revenue; // 순손실(비용-매출)이 클수록 위
+  const wasteGroups = groupsSrc
+    .filter((g) => isWasteful(g.metrics))
+    .sort((a, b) => wasteScore(b.metrics) - wasteScore(a.metrics));
+  const wasteKeywords = keywordsSrc
+    .filter((k) => isWasteful(k.metrics))
+    .sort((a, b) => wasteScore(b.metrics) - wasteScore(a.metrics));
+  const wasteTotal =
+    wasteGroups.reduce((s, g) => s + g.metrics.cost, 0) +
+    wasteKeywords.reduce((s, k) => s + k.metrics.cost, 0);
+  const hasWaste = wasteGroups.length > 0 || wasteKeywords.length > 0;
+
   return (
-    <>
+    // #0 넓은 화면: 공통 MemberShell(max-w-4xl)을 건드리지 않고 상세 뷰만 뷰포트 기준으로 확장
+    <div className="relative left-1/2 w-[94vw] max-w-[1320px] -translate-x-1/2">
       <header className="mb-6">
         <button onClick={onBack} className="text-sm text-neutral-500 transition-colors hover:text-blue-600 dark:text-neutral-400">
           ← 전체 대시보드
@@ -718,55 +744,112 @@ function DetailView({
         ))}
       </section>
 
-      {/* 2) 상위 그룹 랭킹 (1~10위) */}
+      {/* 2) 상위 그룹 랭킹 (1~10위) — SA/DA 구분 + 노출·클릭·비용·CPC·CTR */}
       <section className="mt-8 rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="font-semibold">상위 광고 그룹 (1~10위)</h3>
             <p className="mt-1 text-xs text-neutral-400">{rangeLabel} · {gSort.label} 기준{isReal ? " · 실데이터" : ""}</p>
           </div>
-          <div className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 p-1 dark:border-neutral-800 dark:bg-neutral-800">
-            {SORTS.map((s) => {
-              const active = s.key === groupSort;
-              return (
-                <button key={s.key} onClick={() => setGroupSort(s.key)} className={"rounded-full px-3 py-1.5 text-xs font-medium transition-colors " + (active ? "bg-blue-600 text-white" : "text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200")}>
-                  {s.label}
-                </button>
-              );
-            })}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* #1 SA / DA 구분 필터 (클라이언트 상태 전환 → 즉시 반응) */}
+            <div className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 p-1 dark:border-neutral-800 dark:bg-neutral-800">
+              {([{ key: "all", label: "전체" }, { key: "SA", label: "SA" }, { key: "DA", label: "DA" }] as const).map((t) => {
+                const active = t.key === gTypeFilter;
+                const tint = t.key === "SA" ? TYPE_BADGE.SA.color : t.key === "DA" ? TYPE_BADGE.DA.color : undefined;
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => setGTypeFilter(t.key)}
+                    className={"rounded-full px-3 py-1.5 text-xs font-medium transition-colors " + (active ? "text-white shadow-sm" : "text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200")}
+                    style={active ? { background: tint ?? "#3f3f46" } : undefined}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 p-1 dark:border-neutral-800 dark:bg-neutral-800">
+              {SORTS.map((s) => {
+                const active = s.key === groupSort;
+                return (
+                  <button key={s.key} onClick={() => setGroupSort(s.key)} className={"rounded-full px-3 py-1.5 text-xs font-medium transition-colors " + (active ? "bg-blue-600 text-white" : "text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200")}>
+                    {s.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        <div className="mt-4 space-y-2">
+        {/* 컬럼 헤더 (넓은 화면에서만) */}
+        <div className="mt-4 hidden items-center gap-3 px-4 pb-1 text-[11px] font-medium text-neutral-400 lg:flex" style={{ fontVariantNumeric: "tabular-nums" }}>
+          <span className="w-6 text-center">#</span>
+          <span className="w-8">구분</span>
+          <span className="min-w-0 flex-1">그룹명</span>
+          <span className="w-16 text-right">노출</span>
+          <span className="w-14 text-right">클릭</span>
+          <span className="w-20 text-right">비용</span>
+          <span className="w-16 text-right">CPC</span>
+          <span className="w-14 text-right">CTR</span>
+          <span className="w-12 text-right">전환</span>
+          <span className="w-20 text-right">매출</span>
+          <span className="w-14 text-right">ROAS</span>
+        </div>
+
+        <div className="space-y-2 lg:mt-0">
           {groups.map((g, i) => {
             const pct = (gSort.calc(g.metrics) / maxGroupVal) * 100;
+            const bad = isWasteful(g.metrics); // #2 성과 저조 → 빨간 음영
             return (
-              <div key={g.id} className="relative overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-800">
-                <div className="absolute inset-y-0 left-0" style={{ width: `${pct}%`, background: TYPE_BADGE[g.type].color, opacity: 0.1 }} />
+              <div key={g.id} className={"relative overflow-hidden rounded-xl border " + (bad ? "border-red-300 dark:border-red-900/70" : "border-neutral-200 dark:border-neutral-800")}>
+                <div className="absolute inset-y-0 left-0" style={{ width: `${pct}%`, background: bad ? "#e34948" : TYPE_BADGE[g.type].color, opacity: bad ? 0.14 : 0.1 }} />
                 <div className="relative flex items-center gap-3 px-4 py-2.5">
                   <span className="w-6 text-center text-sm font-bold text-neutral-400">{i + 1}</span>
-                  <span className="rounded px-1.5 py-0.5 text-[10px] font-bold text-white" style={{ background: TYPE_BADGE[g.type].color }}>
+                  <span className="w-8 rounded px-1.5 py-0.5 text-center text-[10px] font-bold text-white" style={{ background: TYPE_BADGE[g.type].color }}>
                     {g.type}
                   </span>
-                  <span className="flex-1 truncate text-sm font-medium">{g.name}</span>
-                  <div className="hidden gap-4 text-right text-xs text-neutral-500 dark:text-neutral-400 sm:flex">
-                    <span className="w-16">클릭 {formatCompact(g.metrics.clicks, false)}</span>
-                    <span className="w-16">전환 {formatValue(g.metrics.conversions, false)}</span>
-                    <span className="w-20">매출 {formatCompact(g.metrics.revenue, true)}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-sm font-medium">{g.name}</span>
+                      {bad && (
+                        <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/50 dark:text-red-300">
+                          {g.metrics.revenue === 0 ? "매출 0" : "저ROAS"}
+                        </span>
+                      )}
+                    </div>
+                    {/* 모바일 축약 지표 */}
+                    <div className="mt-0.5 text-[11px] text-neutral-400 lg:hidden" style={{ fontVariantNumeric: "tabular-nums" }}>
+                      노출 {formatCompact(g.metrics.impressions, false)} · 클릭 {formatCompact(g.metrics.clicks, false)} · 비용 {formatCompact(g.metrics.cost, true)} · CTR {ctrFmt(g.metrics)}
+                    </div>
                   </div>
-                  <span className="w-14 text-right text-sm font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>
+                  <span className="hidden w-16 text-right text-xs text-neutral-500 dark:text-neutral-400 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{formatCompact(g.metrics.impressions, false)}</span>
+                  <span className="hidden w-14 text-right text-xs text-neutral-500 dark:text-neutral-400 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{formatCompact(g.metrics.clicks, false)}</span>
+                  <span className="hidden w-20 text-right text-xs font-medium text-neutral-700 dark:text-neutral-200 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{formatCompact(g.metrics.cost, true)}</span>
+                  <span className="hidden w-16 text-right text-xs text-neutral-500 dark:text-neutral-400 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{cpcFmt(g.metrics)}</span>
+                  <span className="hidden w-14 text-right text-xs text-neutral-500 dark:text-neutral-400 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{ctrFmt(g.metrics)}</span>
+                  <span className="hidden w-12 text-right text-xs text-neutral-500 dark:text-neutral-400 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{formatValue(g.metrics.conversions, false)}</span>
+                  <span className="hidden w-20 text-right text-xs font-medium text-neutral-700 dark:text-neutral-200 lg:block" style={{ fontVariantNumeric: "tabular-nums" }}>{formatCompact(g.metrics.revenue, true)}</span>
+                  <span className={"w-14 text-right text-sm font-bold " + (bad ? "text-red-600 dark:text-red-400" : "")} style={{ fontVariantNumeric: "tabular-nums" }}>
                     {roasFmt(g.metrics)}
                   </span>
                 </div>
               </div>
             );
           })}
+          {groups.length === 0 && (
+            <p className="rounded-xl border border-dashed border-neutral-300 py-6 text-center text-sm text-neutral-400 dark:border-neutral-700">
+              {gTypeFilter === "DA" && isReal
+                ? "DA(디스플레이) 그룹은 GFA 연동 후 표시됩니다."
+                : "표시할 그룹이 없습니다."}
+            </p>
+          )}
         </div>
       </section>
 
       {/* 3) SA 키워드 / DA 소재 */}
       <section className="mt-8 grid gap-6 lg:grid-cols-2">
-        {/* SA 고성과 키워드 */}
+        {/* SA 고성과 키워드 — #3 총비용·매출액만 표시 */}
         <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
           <div className="flex items-center gap-2">
             <span className="rounded-md px-2 py-0.5 text-xs font-bold text-white" style={{ background: TYPE_BADGE.SA.color }}>SA</span>
@@ -775,16 +858,20 @@ function DetailView({
               <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/40 dark:text-green-300">실데이터</span>
             )}
           </div>
-          <p className="mt-1 text-xs text-neutral-400">검색광고 · 전환매출 기준</p>
-          <ol className="mt-4 space-y-2">
+          <p className="mt-1 text-xs text-neutral-400">검색광고 · 전환매출 기준 · 총비용 / 매출액</p>
+          <div className="mt-3 flex items-center gap-3 px-3 text-[11px] font-medium text-neutral-400">
+            <span className="w-5" />
+            <span className="min-w-0 flex-1">키워드</span>
+            <span className="w-24 text-right">총비용</span>
+            <span className="w-24 text-right">매출액</span>
+          </div>
+          <ol className="mt-1 space-y-2">
             {keywords.map((k, i) => (
               <li key={k.id} className="flex items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-950">
                 <span className="w-5 text-center text-xs font-bold text-neutral-400">{i + 1}</span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{k.keyword}</div>
-                  <div className="text-[11px] text-neutral-400">{k.group} · 클릭 {formatCompact(k.metrics.clicks, false)} · 전환 {formatValue(k.metrics.conversions, false)}</div>
-                </div>
-                <span className="text-sm font-bold" style={{ fontVariantNumeric: "tabular-nums" }}>{roasFmt(k.metrics)}</span>
+                <div className="min-w-0 flex-1 truncate text-sm font-medium">{k.keyword}</div>
+                <span className="w-24 text-right text-sm text-neutral-600 dark:text-neutral-300" style={{ fontVariantNumeric: "tabular-nums" }}>{formatValue(k.metrics.cost, true)}</span>
+                <span className="w-24 text-right text-sm font-semibold" style={{ fontVariantNumeric: "tabular-nums" }}>{formatValue(k.metrics.revenue, true)}</span>
               </li>
             ))}
           </ol>
@@ -818,6 +905,74 @@ function DetailView({
           </ol>
         </div>
       </section>
-    </>
+
+      {/* 4) 🚨 긴급 알럿 — 비용은 썼는데 매출이 없거나 비용보다 적은(ROAS<1) 그룹·키워드 */}
+      <section className={"mt-8 rounded-2xl border p-6 shadow-sm " + (hasWaste ? "border-red-300 bg-red-50/70 dark:border-red-900/70 dark:bg-red-950/30" : "border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900")}>
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">{hasWaste ? "🚨" : "✅"}</span>
+            <h3 className={"font-semibold " + (hasWaste ? "text-red-700 dark:text-red-300" : "")}>
+              긴급 점검 — 비용 대비 성과 저조
+            </h3>
+          </div>
+          {hasWaste && (
+            <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/50 dark:text-red-300">
+              낭비 추정 {formatCompact(wasteTotal, true)} · {wasteGroups.length + wasteKeywords.length}건
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+          매출 0이거나 매출보다 비용을 더 쓴(ROAS 1x 미만) 항목입니다. 입찰가·키워드 재점검이 필요합니다. ({rangeLabel})
+        </p>
+
+        {!hasWaste ? (
+          <p className="mt-4 rounded-xl border border-dashed border-neutral-300 py-6 text-center text-sm text-neutral-400 dark:border-neutral-700">
+            현재 기간에 비용 대비 성과가 저조한 그룹·키워드가 없습니다. 👍
+          </p>
+        ) : (
+          <div className="mt-4 grid gap-6 lg:grid-cols-2">
+            {/* 낭비 그룹 */}
+            <div>
+              <h4 className="mb-2 text-sm font-semibold text-neutral-600 dark:text-neutral-300">광고 그룹 {wasteGroups.length > 0 && `(${wasteGroups.length})`}</h4>
+              {wasteGroups.length === 0 ? (
+                <p className="rounded-lg bg-white/60 px-3 py-3 text-xs text-neutral-400 dark:bg-neutral-900/40">해당 그룹 없음</p>
+              ) : (
+                <ul className="space-y-2">
+                  {wasteGroups.slice(0, 8).map((g) => (
+                    <li key={g.id} className="flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 dark:border-red-900/60 dark:bg-neutral-950">
+                      <span className="w-7 rounded px-1 py-0.5 text-center text-[10px] font-bold text-white" style={{ background: TYPE_BADGE[g.type].color }}>{g.type}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{g.name}</span>
+                      <span className="text-right text-xs text-neutral-500 dark:text-neutral-400" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        비용 <b className="text-red-600 dark:text-red-400">{formatCompact(g.metrics.cost, true)}</b> · 매출 {formatCompact(g.metrics.revenue, true)}
+                      </span>
+                      <span className="w-12 text-right text-sm font-bold text-red-600 dark:text-red-400" style={{ fontVariantNumeric: "tabular-nums" }}>{roasFmt(g.metrics)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            {/* 낭비 키워드 */}
+            <div>
+              <h4 className="mb-2 text-sm font-semibold text-neutral-600 dark:text-neutral-300">SA 키워드 {wasteKeywords.length > 0 && `(${wasteKeywords.length})`}</h4>
+              {wasteKeywords.length === 0 ? (
+                <p className="rounded-lg bg-white/60 px-3 py-3 text-xs text-neutral-400 dark:bg-neutral-900/40">해당 키워드 없음</p>
+              ) : (
+                <ul className="space-y-2">
+                  {wasteKeywords.slice(0, 8).map((k) => (
+                    <li key={k.id} className="flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 dark:border-red-900/60 dark:bg-neutral-950">
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{k.keyword}</span>
+                      <span className="text-right text-xs text-neutral-500 dark:text-neutral-400" style={{ fontVariantNumeric: "tabular-nums" }}>
+                        비용 <b className="text-red-600 dark:text-red-400">{formatCompact(k.metrics.cost, true)}</b> · 매출 {formatCompact(k.metrics.revenue, true)}
+                      </span>
+                      <span className="w-12 text-right text-sm font-bold text-red-600 dark:text-red-400" style={{ fontVariantNumeric: "tabular-nums" }}>{roasFmt(k.metrics)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
