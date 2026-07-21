@@ -110,6 +110,10 @@ const EMPTY: Fields = {
 
 type Saved = { id: number; doc: DocTab; data: Fields };
 
+// 작업물 갤러리에 올라가는 항목 (인사서식 앱 외에 앞으로 추가할 작업물들)
+type Work = { id: number; title: string; desc: string; link: string; date: string };
+const WORKS_KEY = "jeong-sinwoo:works";
+
 export default function Page() {
   const [tab, setTab] = useState<Tab>("employment");
   const [lastDoc, setLastDoc] = useState<DocTab>("employment");
@@ -117,6 +121,11 @@ export default function Page() {
   const [saved, setSaved] = useState<Saved[]>([]);
   const [savedMsg, setSavedMsg] = useState("");
   const [toEmail, setToEmail] = useState("shinuing@naver.com");
+
+  // 작업물 갤러리 (기본은 목록 화면, 인사서식 앱은 그 중 한 카드로 들어감)
+  const [view, setView] = useState<"gallery" | "hr-app">("gallery");
+  const [works, setWorks] = useState<Work[]>([]);
+  const [newWork, setNewWork] = useState({ title: "", desc: "", link: "" });
 
   const up =
     (k: keyof Fields) =>
@@ -133,6 +142,12 @@ export default function Page() {
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (raw) setSaved(JSON.parse(raw));
+    } catch {
+      /* 무시 */
+    }
+    try {
+      const rawWorks = localStorage.getItem(WORKS_KEY);
+      if (rawWorks) setWorks(JSON.parse(rawWorks));
     } catch {
       /* 무시 */
     }
@@ -171,6 +186,40 @@ export default function Page() {
 
   function removeEntry(id: number) {
     persist(saved.filter((s) => s.id !== id));
+  }
+
+  function persistWorks(next: Work[]) {
+    setWorks(next);
+    try {
+      localStorage.setItem(WORKS_KEY, JSON.stringify(next));
+    } catch {
+      /* 무시 */
+    }
+  }
+
+  function addWork() {
+    if (!newWork.title.trim()) {
+      setSavedMsg("작업물 제목을 입력하면 등록할 수 있어요.");
+      return;
+    }
+    const today = new Date();
+    const date = `${today.getFullYear()}.${String(today.getMonth() + 1).padStart(2, "0")}.${String(today.getDate()).padStart(2, "0")}`;
+    const next = [
+      {
+        id: Date.now(),
+        title: newWork.title.trim(),
+        desc: newWork.desc.trim(),
+        link: newWork.link.trim(),
+        date,
+      },
+      ...works,
+    ];
+    persistWorks(next);
+    setNewWork({ title: "", desc: "", link: "" });
+  }
+
+  function removeWork(id: number) {
+    persistWorks(works.filter((w) => w.id !== id));
   }
 
   // 현재 탭 문서 하나를 이메일/서명용 평문으로 변환
@@ -384,8 +433,27 @@ export default function Page() {
 
   return (
     <MemberShell slug="jeong-sinwoo">
-      {/* 인쇄 시 미리보기(#cert-print)만 남기고 나머지는 숨김 */}
-      <style>{`
+      {view === "gallery" ? (
+        <GalleryView
+          works={works}
+          onOpenHr={() => setView("hr-app")}
+          newWork={newWork}
+          setNewWork={setNewWork}
+          onAddWork={addWork}
+          onRemoveWork={removeWork}
+        />
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => setView("gallery")}
+            className="print:hidden mb-4 inline-flex items-center gap-1 text-sm font-medium text-neutral-500 transition-colors hover:text-neutral-800 dark:hover:text-neutral-200"
+          >
+            ← 작업물 목록으로
+          </button>
+
+          {/* 인쇄 시 미리보기(#cert-print)만 남기고 나머지는 숨김 */}
+          <style>{`
         /* PDF 캡처 시 최신 색상함수(oklch) 파싱 오류를 피하려고 색을 hex로 고정 */
         .pdf-capture, .pdf-capture * { color: #111827 !important; border-color: #4b5563 !important; }
         .pdf-capture { background: #ffffff !important; box-shadow: none !important; }
@@ -709,8 +777,139 @@ export default function Page() {
             </div>
           </section>
         </div>
+          )}
+        </>
       )}
     </MemberShell>
+  );
+}
+
+/* ───────────── 작업물 갤러리 ───────────── */
+
+function GalleryView({
+  works,
+  onOpenHr,
+  newWork,
+  setNewWork,
+  onAddWork,
+  onRemoveWork,
+}: {
+  works: Work[];
+  onOpenHr: () => void;
+  newWork: { title: string; desc: string; link: string };
+  setNewWork: React.Dispatch<
+    React.SetStateAction<{ title: string; desc: string; link: string }>
+  >;
+  onAddWork: () => void;
+  onRemoveWork: (id: number) => void;
+}) {
+  return (
+    <div className="space-y-8">
+      <section>
+        <h2 className="text-lg font-semibold">내 작업물</h2>
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+          지금까지 만든 작업물과, 앞으로 새로 올릴 작업물을 여기에 모아둡니다.
+        </p>
+
+        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* 고정 카드: 이미 만들어 둔 작업물 */}
+          <button
+            type="button"
+            onClick={onOpenHr}
+            className="flex flex-col rounded-2xl border border-neutral-200 bg-white p-5 text-left transition-colors hover:border-indigo-400 hover:shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
+          >
+            <span className="inline-flex w-fit items-center rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">
+              완성
+            </span>
+            <h3 className="mt-3 font-semibold">📄 인사서식 자동작성</h3>
+            <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+              재직증명서 · 사직서 · 경력증명서 · 경위서 · 시말서를 실시간
+              미리보기로 작성하고, 인쇄 · PDF · 이메일 · 전자서명으로 전달까지
+              되는 도구.
+            </p>
+            <span className="mt-4 text-sm font-medium text-indigo-600 dark:text-indigo-400">
+              열어보기 →
+            </span>
+          </button>
+
+          {/* 새로 등록한 작업물 카드들 */}
+          {works.map((w) => (
+            <div
+              key={w.id}
+              className="flex flex-col rounded-2xl border border-neutral-200 bg-white p-5 dark:border-neutral-800 dark:bg-neutral-900"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="font-semibold">{w.title}</h3>
+                <button
+                  type="button"
+                  onClick={() => onRemoveWork(w.id)}
+                  aria-label="삭제"
+                  className="rounded-lg px-1.5 py-1 text-sm text-neutral-400 hover:bg-neutral-100 hover:text-red-500 dark:hover:bg-neutral-800"
+                >
+                  ✕
+                </button>
+              </div>
+              {w.desc && (
+                <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+                  {w.desc}
+                </p>
+              )}
+              {w.link && (
+                <a
+                  href={w.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                >
+                  링크 열기 →
+                </a>
+              )}
+              <span className="mt-3 text-xs text-neutral-400">{w.date}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-dashed border-neutral-300 p-6 dark:border-neutral-700">
+        <h2 className="text-base font-semibold">➕ 새 작업물 올리기</h2>
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
+          제목과 설명, (있다면) 링크를 적고 등록하면 위 목록에 카드로
+          추가됩니다. 이 브라우저에 저장돼요.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <input
+            value={newWork.title}
+            onChange={(e) =>
+              setNewWork((s) => ({ ...s, title: e.target.value }))
+            }
+            placeholder="작업물 제목"
+            className={inputCls}
+          />
+          <input
+            value={newWork.link}
+            onChange={(e) =>
+              setNewWork((s) => ({ ...s, link: e.target.value }))
+            }
+            placeholder="링크 (선택, 예: https://...)"
+            className={inputCls}
+          />
+        </div>
+        <textarea
+          value={newWork.desc}
+          onChange={(e) => setNewWork((s) => ({ ...s, desc: e.target.value }))}
+          placeholder="간단한 설명 (선택)"
+          rows={2}
+          className={inputCls + " mt-3 min-h-16 resize-y"}
+        />
+        <button
+          type="button"
+          onClick={onAddWork}
+          className="mt-3 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-700"
+        >
+          작업물 등록
+        </button>
+      </section>
+    </div>
   );
 }
 
