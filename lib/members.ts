@@ -26,6 +26,7 @@ export const MEMBERS: Member[] = [
   { slug: "hong-jiho", name: "홍지호", team: "스토어" },
   { slug: "jo-kwonil", name: "조권일", team: "스토어" },
   { slug: "ha-jiyoung", name: "하지영", team: "스토어" },
+  { slug: "lee-jaeseong", name: "이재성", team: "스토어" },
 ];
 
 export function getMember(slug: string): Member | undefined {
